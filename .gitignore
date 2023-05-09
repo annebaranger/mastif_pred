@@ -1,0 +1,11 @@
+.Rproj.user
+.Rhistory
+.RData
+.Ruserdata
+data/
+draft/
+output/
+SpeciesMeanClimate_GBIF-main/
+target_*
+*.png
+*.RData

@@ -1,0 +1,6 @@
+data:
+  script: script_data.R
+  store: target_data
+data_gbif:
+  script: script_gbif.R
+  store: target_gbif
