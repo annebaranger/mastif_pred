@@ -10,6 +10,8 @@ options(tidyverse.quiet = TRUE)
 sf::sf_use_s2(FALSE)
 tar_option_set(packages = packages.in)
 
+species.eu=tar_read(species.eu,store = "target_data")
+species.am=tar_read(species.am,store = "target_data")
 
 list(
   
@@ -23,12 +25,13 @@ list(
   tar_target(email, "annebarang@gmail.com"), 
   
   # Make and send request to download data from GBIF
-  tar_target(sp_vec, get_species()), 
+  tar_target(df.species,get_species(species.am,species.eu)),
+  tar_target(sp_vec, df.species$TaxonName), 
   tar_target(gbif_taxon_keys, get_gbif_taxon_keys(sp_vec)), 
   tar_target(data_gbif, get_data_gbif(gbif_taxon_keys, user, pwd, email)),
   
   # Remove observations out of native species range
-  tar_target(data_gbif_filtered, filter_data_gbif(data_gbif)),
+  tar_target(data_gbif_filtered, filter_data_gbif(data_gbif,df.species)),
   
   
   
