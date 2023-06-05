@@ -84,11 +84,16 @@ write_on_disk <- function(table.in, file.in){
 
 #' Get the species for which to get GBIF presence data
 #' @return A character vector containing species latin name
-get_species <- function(){
-  c("Abies alba", "Acer nigrum", "Carpinus betulus" , "Cedrus atlantica", "Fagus sylvatica", 
-    "Frangula alnus", "Laurus nobilis", "Picea abies", "Pinus pinaster", "Pinus pinea", "Pinus sylvestris",
-    "Quercus ilex", "Quercus petraea", "Quercus pubescens", "Quercus robur","Sorbus aucuparia")
-  # c("Abies alba", "Acer campestre", "Acer pseudoplatanus", "Alnus glutinosa", "Betula pendula", 
+get_species <- function(species.am,species.eu){
+  df.species =rbind(species.am,species.eu) |> 
+    select(-Author) |> 
+    distinct()
+  
+  return(df.species)
+  # c("Abies alba", "Acer nigrum", "Carpinus betulus" , "Cedrus atlantica", "Fagus sylvatica", 
+  #   "Frangula alnus", "Laurus nobilis", "Picea abies", "Pinus pinaster", "Pinus pinea", "Pinus sylvestris",
+  #   "Quercus ilex", "Quercus petraea", "Quercus pubescens", "Quercus robur","Sorbus aucuparia")
+  # # c("Abies alba", "Acer campestre", "Acer pseudoplatanus", "Alnus glutinosa", "Betula pendula", 
   #   "Carpinus betulus" , "Castanea sativa", "Erica arborea", "Eucalyptus camaldulensis", "Fagus sylvatica", 
   #   "Fraxinus angustifolia", "Fraxinus excelsior", "Juniperus thurifera", "Myrica faya", "Olea europaea", 
   #   "Picea abies", "Pinus canariensis", "Pinus halepensis", "Pinus nigra", "Pinus pinaster", "Pinus pinea", 
@@ -183,17 +188,18 @@ get_data_gbif <- function(gbif_taxon_keys, user, pwd, email){
 
 #' Function to filter gbif observations outside of the species native continent
 #' @param data_gbif presence data of gbif with coordinates
-filter_data_gbif <- function(data_gbif){
+filter_data_gbif <- function(data_gbif,df.species){
   
   # Create a table with coordinates limits for each species
   coord_lim <- data.frame(species = unique(data_gbif$species)) %>%
+    left_join(df.species[,c("TaxonName","block")],by=c("species"="TaxonName")) |> 
     mutate(
-      block = case_when(species %in% c("Pseudotsuga menziesii", "Robinia pseudoacacia") ~ "American native block", 
-                        species == "Eucalyptus camaldulensis" ~ "Australian native block", 
-                        TRUE ~ "Eurasian native block"), 
-      coord = case_when(block == "American native block" ~ "0_80_-160_-30", 
+      # block = case_when(species %in% c("Pseudotsuga menziesii", "Robinia pseudoacacia") ~ "American native block", 
+      #                   species == "Eucalyptus camaldulensis" ~ "Australian native block", 
+      #                   TRUE ~ "Eurasian native block"), 
+      coord = case_when(block == "america" ~ "0_80_-160_-30", 
                         block == "Australian native block" ~ "-45_-8_110_154", 
-                        block == "Eurasian native block" ~ "25_75_-10_160")
+                        block == "europe" ~ "25_75_-10_160")
     ) %>%
     separate(col = "coord", into = c("lat.min", "lat.max", "long.min", "long.max"), sep = "_") %>%
     mutate(long.min = as.numeric(long.min), long.max = as.numeric(long.max), 

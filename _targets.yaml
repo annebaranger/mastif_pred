@@ -4,3 +4,6 @@ data:
 data_gbif:
   script: script_gbif.R
   store: target_gbif
+data_nfi:
+  script: script_nfi.R
+  store: target_nfi
