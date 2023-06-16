@@ -148,7 +148,7 @@ select_species <- function(mastif.am,
            high=weighted.quantile(clim_val,1/cv_plot,prob=0.975)[1]) |> 
     ungroup()
   
-  (df.tree.weight |>
+  df.tree.weight |>
     # format to match df.niche 
     select(species,clim,opt,low,high) |> unique() |> 
     pivot_wider(names_from = "clim",
@@ -157,8 +157,9 @@ select_species <- function(mastif.am,
     pivot_longer(cols=-species,
                  names_to = "clim",
                  values_to = "clim_obs") |> 
-    mutate(clim=paste0(str_split_i(clim,"\\.",2),".",str_split_i(clim,"\\.",1))) |> 
+    mutate(clim=paste0(str_split_i(clim,"\\.",2),".",str_split_i(clim,"\\.",1))) -> mastif.range
     #merge with gbif climate
+  (mastif.range |> 
     left_join(df.niche,by=c("species","clim")) |> 
     relocate(species_l,.after=species)|> 
     separate(clim,into=c("var","quant"),remove=FALSE) |> 
@@ -177,6 +178,7 @@ select_species <- function(mastif.am,
   
   return(list(df.gbif=df.niche,
               df.tree_w=df.tree.weight,
+              mastif.range=mastif.range,
               sp.select.am=sp.select.am,
               sp.select.eu=sp.select.eu))
 }
@@ -184,7 +186,7 @@ select_species <- function(mastif.am,
 
 
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-#### Section 3 - NFI data collection ####
+#### Section 3 - NFI data fecundity ####
 #' @authors Anne Baranger (INRAE - LESSEM)
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -231,11 +233,10 @@ get_nfi <- function(clim_list,
   return(df.nfi)
 }
 
-
-#' Compute margin class for each plot of nfi
+#' Compute acp prediction for each plot of nfi
 #' @param df.nfi
-compute_margin<-function(df.nfi,
-                         clim_var=c("sgdd","wai")){
+compute_acp<-function(df.nfi,
+                      clim_var=c("sgdd","wai")){
   clim_pca<-prcomp(df.nfi[,clim_var] |> drop_na(),
                    scale. = TRUE) 
   clim_pred <- cbind(df.nfi,
@@ -247,8 +248,23 @@ compute_margin<-function(df.nfi,
               df.nfi.clim=clim_pred))
 }
 
+#' Compute margin class for each plot of nfi
+#' @param df.nfi.clim
+compute_margin<-function(df.nfi.clim,
+                         fecundity){
+  species.margin <- fecundity |> 
+    filter(BA!=0) |> 
+    left_join(df.nfi.clim,by="plot") |> 
+    group_by(species) |> 
+    summarise(quant95=quantile(PC1,probs=0.95,na.rm=TRUE)[[1]],
+              quant525=quantile(PC1,probs=0.525,na.rm=TRUE)[[1]],
+              quant475=quantile(PC1,probs=0.475,na.rm=TRUE)[[1]],
+              quant05=quantile(PC1,probs=0.05,na.rm=TRUE)[[1]])
+  return(species.margin)
+}
 
-#' Load fecundity for each plot, including mean and sd estimation, ISP a,d basal area
+
+#' Load fecundity for each plot, including mean and sd estimation, ISP and basal area
 #' @param continent
 #' @param sp.select
 get_fecundity <- function(continent,
@@ -295,6 +311,8 @@ get_fecundity <- function(continent,
     mutate(fecGmMu=na_if(fecGmMu,0),
            fecGmSd=na_if(fecGmSd,0),
            ISP=na_if(ISP,0)) |> 
+    group_by(species) |> 
+    mutate(n=sum(BA>0)) |> filter(n>200) |> 
     group_by(plot,species) |> 
     mutate(n_plot=n(),
            fecGmMu_plot=mean(fecGmMu,na.rm=TRUE),
@@ -305,3 +323,60 @@ get_fecundity <- function(continent,
   
   return(fecundity)
 }
+
+
+
+
+#%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+#### Section 3 - Traits compilation ####
+#' @authors Anne Baranger, Julien Barrère (INRAE - LESSEM)
+#%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+#' Compile all traits data
+#' @author Julien Barrère
+#' @param TRY_file file containing TRY request
+#' @param species.in character vector of all the species for which to extract the data
+compile_traits_TRY <- function(TRY_file, NFI.traits_file){
+  
+  # -- Species name
+  species.in <- fread(NFI.traits_file)$species
+  
+  # -- Translate TRY traits code into abbreviated traits name
+  TRY.traits.name <- data.frame(
+    TraitID = c(24, 3117, 146, 14, 56, 15, 46, 65, 1111, 2809, 2807, 2808, 159, 30, 318, 
+                31, 719, 59, 819, 45, 773, 413, 324, 1229, 153, 865, 837, 3446), 
+    trait = c("bark.thickness", "leaf.sla", "leaf.CN.ratio", "leaf.N.mass", "leaf.NP.ratio", 
+              "leaf.P.mass", "leaf.thickness", "root.type", "seedbank.density", 
+              "seedbank.duration", "seedbank.n.layers", "seedbank.thickness.toplayer", 
+              "seedbank.type", "tolerance.drought", "tolerance.fire", "tolerance.frost", 
+              "xylem.hydraulic.vulnerability", "plant.lifespan", "plant.resprouting.capacity", 
+              "stomata.conductance", "crown.height", "leaf.Chl.content", "crown.length", 
+              "wood.Nmass", "budbank.height.distribution", "budbank.seasonality", 
+              "bark.structure", "plant.biomass")
+  )
+  
+  
+  
+  ## -- Compile numeric traits data
+  traits.TRY <-data.table::fread(TRY_file) %>%
+    filter(!is.na(TraitID)) %>%
+    filter(!is.na(StdValue)) %>%
+    filter(AccSpeciesName %in% species.in) %>%
+    left_join(TRY.traits.name, by = "TraitID") %>%
+    mutate(trait = paste("TRY", trait, gsub("\\ ", "", UnitName), sep = "_"), 
+           trait = gsub("\\/", ".", trait)) %>%
+    rename("species" = "AccSpeciesName") %>%
+    group_by(species, trait) %>%
+    summarize(trait.value = mean(StdValue, na.rm = TRUE)) %>%
+    ungroup() %>%
+    group_by(trait) %>%
+    mutate(n.species.per.trait = n()) %>%
+    filter(n.species.per.trait >= 10) %>% 
+    dplyr::select(-n.species.per.trait) %>%
+    spread(key = trait, value = trait.value)  
+  
+  return(traits.TRY)
+}
+
+
+

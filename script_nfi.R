@@ -52,12 +52,12 @@ list(
   # margins
   tar_target(
     nfi.am_clim,
-    compute_margin(df.nfi.am,
+    compute_acp(df.nfi.am,
                    clim_var=c("sgdd","wai"))
   ),
   tar_target(
     nfi.eu_clim,
-    compute_margin(df.nfi.eu,
+    compute_acp(df.nfi.eu,
                    clim_var=c("sgdd","wai"))
     ),
   
@@ -71,6 +71,40 @@ list(
     fec.am,
     get_fecundity(continent="america",
                   sp.select.am)
+  ),
+  
+  # fecundity margin
+  tar_target(
+    sp.margin.eu,
+    compute_margin(nfi.eu_clim$df.nfi.clim,
+                   fec.eu)
+  ),
+  tar_target(
+    sp.margin.am,
+    compute_margin(nfi.am_clim$df.nfi.clim,
+                   fec.am)
+  ),
+  
+  # fecundity x plot
+  tar_target(
+    fecundity.eu_clim,
+    fec.eu |> 
+      left_join(nfi.eu_clim$df.nfi.clim)|> 
+      left_join(sp.margin.eu) |> 
+      mutate(margin=case_when(PC1<quant05~"low",
+                              PC1>quant475&PC1<quant525~"opt",
+                              PC1>quant95~"up",
+                              TRUE~NA))
+  ),
+  tar_target(
+    fecundity.am_clim,
+    fec.am |> 
+      left_join(nfi.am_clim$df.nfi.clim)|> 
+      left_join(sp.margin.am) |> 
+      mutate(margin=case_when(PC1<quant05~"low",
+                              PC1>quant475&PC1<quant525~"opt",
+                              PC1>quant95~"up",
+                              TRUE~NA))
   ),
   NULL
 )
