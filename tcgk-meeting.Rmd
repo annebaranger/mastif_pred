@@ -1,0 +1,814 @@
+---
+title: "TCGK-22/06/2023"
+author: "Anne Baranger"
+date: "2023-06-21"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE,message=FALSE)
+library(targets)
+lapply(c("stringr","ggplot2","tidyr","dplyr","rworldmap","modi","tibble","terra","factoextra","sf","data.table","viridis","robustbase"),require,character.only=TRUE)
+theme_set(theme_minimal())
+tar_load(mastif.eu,store="target_data")
+tar_load(mastif.am,store="target_data")
+
+#tar_load(meanClimate_species,store="target_gbif")
+
+tar_load(species_selection,store="target_nfi")
+
+df.mastif.tree=rbind(mastif.am$df.tree,mastif.eu$df.tree) 
+df.species=rbind(mastif.am$df.species.select,mastif.eu$df.species.select)
+sp.select.eu=species_selection$sp.select.eu
+sp.select.am=species_selection$sp.select.am
+
+
+# small format of gbif
+df.gbif.short <- species_selection$df.gbif |>
+  separate(clim,into = c("clim","range")) |> 
+  pivot_wider(names_from = range,
+                values_from = clim_niche)
+
+# tar_load(nfi.am_clim,store="target_nfi")
+# tar_load(nfi.eu_clim,store="target_nfi")
+tar_load(fecundity.eu_clim,store="target_nfi")
+tar_load(fecundity.am_clim,store="target_nfi")
+```
+
+# Data map 
+
+```{r MastifPlots, fig.cap="Maps of Mastif calibration plots"}
+
+# df.niche=read.csv("output/sp_gbif_climate.csv",sep=" ")
+#plot initial dataset and selection
+worldmap <- sf::st_as_sf(getMap(resolution = "high"))
+
+
+# plots of selected species
+df.mastif.tree |> 
+  filter(species %in% df.species$species) |> 
+  select(species,lon,lat) |> 
+  distinct() |> 
+  ggplot() +
+  geom_sf(data=worldmap,fill=NA) +
+  geom_point(aes(x=lon,y=lat,color=species))+
+  xlim(range(df.species[,c("minlon","maxlon")])) + 
+  ylim(range(df.species[,c("minlat","maxlat")]))+
+  theme_minimal()+
+  theme(axis.title = element_blank(),
+        axis.text = element_blank(),
+        legend.position = "none")+
+  labs(color="Species")
+```
+
+# Species selection
+
+Table of tree effectives :
+
+```{r PlotsnSp,fig.cap="Numbers of plots per species"}
+df.mastif.tree |> 
+  filter(!duplicated(treeID)) |> 
+  group_by(species) |> 
+  mutate(n_ind=n()) |> ungroup() |> 
+  select(species,n_ind,plotID) |> 
+  unique() |> 
+  group_by(species,n_ind) |> 
+  summarise(n=n())
+
+
+```
+
+Species deleted:
+
+```{r spdeleted}
+sp.deleted=unique(df.species$species)[!unique(df.species$species)%in% c(sp.select.am,sp.select.eu)] 
+for (sp in sp.deleted){
+  plot<-species_selection$df.tree_w |>
+    select(plotID,species,clim,clim_val,cv_plot,low,high) |> 
+    left_join(df.gbif.short,by=c("species","clim")) |> 
+    filter(species==sp) |> 
+    ggplot()+
+    geom_histogram(aes(x=clim_val,y=..density..,weight=1/cv_plot))+
+    geom_point(aes(x=opt,y=0),color="darkred",size=1)+
+    geom_segment(aes(x=low.y,xend=high.y,y=-0,yend=-0),color="darkred",size=1)+
+    geom_vline(aes(xintercept = low.x))+
+    geom_vline(aes(xintercept = high.x))+
+    facet_wrap(~clim,
+               # nrow = 3,
+               scales = "free")+
+    labs(title=sp)
+  print(plot)
+  rm(plot)
+}
+rm(sp.deleted)
+```
+
+Species selected: 
+```{r}
+print(paste0("American species : ",length(sp.select.am)))
+print(paste0("European species : ",length(sp.select.eu)))
+```
+# Fecundity variation with geographic distance to the center - European case
+
+
+## Variation of ISP with latitude
+
+Not clear.
+
+```{r ISPlat}
+fecundity.eu_clim |> 
+  filter(BA!=0) |> 
+  ggplot(aes(lat,ISP))+
+  geom_point()+
+  scale_y_log10()+
+  geom_smooth(method="gam")
+
+fecundity.eu_clim |> 
+  filter(BA!=0) |> 
+  ggplot(aes(lat,ISP))+
+  geom_point()+
+  scale_y_log10()+
+  geom_smooth(method="gam")+
+  facet_wrap(~species)
+
+fecundity.eu_clim |> 
+  filter(BA!=0) |> 
+  group_by(species) |> 
+  mutate(lat.margin=case_when(lat<quantile(lat,probs=0.05)[1]~"south",
+                              lat>quantile(lat,probs=0.95)[1]~"north",
+                              lat<quantile(lat,probs=0.525)[1]&
+                                lat>quantile(lat,probs=0.475)[1]~"mid")) |> 
+  filter(!is.na(lat.margin)) |> 
+  ggplot(aes(lat.margin,ISP))+
+  geom_boxplot()+
+  scale_y_log10()+
+  facet_wrap(~species)
+```
+
+## Characterize peripheral population with dbscan
+
+
+```{r ISPdbscan}
+# create dataset without absences and get minimum effectives
+sp.dataset=as.data.table(fecundity.eu_clim |> filter(BA!=0))
+nmin=sp.dataset[BA != 0,.(n = .N),by = species][n == sort(n)[2],n]
+
+# determine centroid
+for (sp in unique(sp.dataset$species)){  #c("sorbusAucupari","fagusSylvatic","abiesAlba","piceaAbies")
+  print(sp)
+  
+  # compute centroid of distribution
+  sp.geodataset <- st_as_sf(sp.dataset[species==sp,], coords = c("lon", "lat"), crs = 4326)
+  sp.centroid <- st_centroid(st_union(sp.geodataset$geometry),ratio=1)
+  # plot(sp.geodataset$geometry)
+  # plot(sp.centroid,add=TRUE,col="red")
+  # n=max(round(dim(sp.dataset[species==sp,])[1]/1000),9)
+ 
+  # create dataset with distance from centroid and sample nmin 
+  df.kmeans=cbind(sp.dataset[species==sp,],
+      dist=as.numeric(st_distance(sp.geodataset,sp.centroid))) |>
+    sample_n(nmin,replace=TRUE)
+  #option for sleection only a the furthest points
+    # filter(dist>quantile(dist,probs=0.85)[[1]])
+    # arrange(desc(dist)) |>
+    # slice(1:(max(500,n()/10)))
+  
+  # print distribution and overlay points selected for margin
+  print(
+    ggplot()+
+      geom_point(data=sp.dataset[species==sp,],aes(x=lon,y=lat))+
+      geom_point(data=df.kmeans,aes(x=lon,y=lat),color="red")+
+      geom_sf(data=worldmap,fill=NA)+
+      xlim(-10,33)+ylim(37,70) # europe
+      # xlim(-125,-75)+ylim(24,70) # northamerica
+    )
+  
+  # dbscan
+  dbscan::kNNdistplot(df.kmeans[,c("lon","lat")], k =  7)
+  eps=quantile(dbscan::kNNdist(df.kmeans[,c("lon","lat")], k =  7),probs=0.85)[[1]]
+  print(eps)
+  fpc::dbscan(df.kmeans[,c("lon","lat")],eps=0.5,MinPts =7)->df.dbscan
+
+  # print dbscan clusters
+  print(
+    cbind(df.kmeans,
+          cluster=df.dbscan$cluster) |>
+      filter(cluster!=0) |> 
+      ggplot()+
+      geom_sf(data=worldmap,fill=NA,alpha=0.4)+
+      geom_point(aes(x=lon,y=lat,colour=as.factor(cluster)))+
+      xlim(-10,33)+ylim(37,70) # europe
+      # xlim(-125,-75)+ylim(24,70) # northamerica
+  )
+  
+  
+  # boxplots of fecundity in clusters with enough individuals
+  print(
+    cbind(df.kmeans,
+          cluster=as.character(df.dbscan$cluster))|> 
+      filter(cluster !=0) |> 
+      group_by(cluster) |> 
+      mutate(n.cluster=n(),
+             mean.lat=mean(lat),
+             mean.dist=mean(dist)) |> 
+      ungroup() |>
+      filter(n.cluster>40) |> 
+      mutate(order.min=dense_rank(mean.dist)) |> 
+      filter(order.min==1 | order.min > max(order.min)-3) |> 
+      # filter(cluster=="core"|
+      #          mean.lat==max(mean.lat)|
+      #          mean.lat==min(mean.lat)) |> 
+      mutate(cluster=forcats::fct_reorder(as.factor(cluster),mean.dist)) |> 
+      ggplot(aes(cluster,ISP,fill=mean.lat))+
+      geom_boxplot()+
+      scale_y_log10()+
+      ggtitle(label=sp)
+
+  )
+  
+   print(
+    cbind(df.kmeans,
+          cluster=as.character(df.dbscan$cluster))|> 
+      filter(cluster !=0) |> 
+      ggplot(aes(dist,ISP,fill=lat))+
+      geom_point()+
+      scale_y_log10()+
+      geom_smooth(method="gam")+
+      ggtitle(label=sp)
+
+  )
+  }
+  # dbscan::kNNdistplot(df.kmeans[,c("lon","lat")], k =  7)
+  # 
+  # # boxplots of fecundity in clusters with enough individuals
+  # print(
+  #   bind_rows(
+  #     # core population
+  #     cbind(sp.dataset[species==sp,],
+  #           dist=as.numeric(st_distance(sp.geodataset,sp.centroid))) |> 
+  #       arrange(dist) |>
+  #       slice(1:(max(300,n()/15))) |> 
+  #       mutate(cluster="core"),
+  #     # clusters
+  #     cbind(df.kmeans,
+  #       cluster=as.character(df.dbscan$cluster))
+  #   ) |> 
+  #     filter(cluster !=0) |> 
+  #     group_by(cluster) |> 
+  #     mutate(n.cluster=n(),
+  #            mean.lat=mean(lat),
+  #            mean.dist=mean(dist)) |> 
+  #     ungroup() |>
+  #     filter(n.cluster>40) |> 
+  #     mutate(order.min=dense_rank(mean.dist)) |> 
+  #     filter(order.min==1 | order.min > max(order.min)-3) |> 
+  #     # filter(cluster=="core"|
+  #     #          mean.lat==max(mean.lat)|
+  #     #          mean.lat==min(mean.lat)) |> 
+  #     mutate(cluster=forcats::fct_reorder(as.factor(cluster),mean.dist)) |> 
+  #     ggplot(aes(cluster,ISP,fill=mean.lat))+
+  #     geom_boxplot()+
+  #     scale_y_log10()
+  # 
+  # )
+
+#   # code with k-means algo
+#   # kmeans
+#   kmeans(df.kmeans[,c("lon","lat")],4)->sum.kmeans
+#   ## map clusters
+#   print(cbind(df.kmeans,
+#         cluster=sum.kmeans$cluster) |> 
+#     ggplot(aes(x=lon,y=lat,colour=as.factor(cluster)))+
+#     geom_point())
+#   ## draw boxplots
+#   print(cbind(df.kmeans,
+#         cluster=sum.kmeans$cluster) |> 
+#     group_by(cluster) |> 
+#     mutate(m.dist=mean(dist)) |> 
+#     ungroup() |> 
+#     mutate(order.min=dense_rank(m.dist)) |> 
+#     filter(order.min==1 | order.min > max(order.min)-3) |> 
+#     mutate(cluster=forcats::fct_reorder(as.factor(cluster),m.dist)) |> 
+#     ggplot(aes(as.factor(cluster),ISP,fill=m.dist))+
+#     geom_boxplot()+
+#     scale_y_log10())
+
+rm(sp.dataset,nmin,sp.geodataset,sp.centroid,df.kmeans,eps)
+
+
+```
+## Kmeans
+
+```{r ISPdistgeo}
+# create dataset without absences and get minimum effectives
+sp.dataset=as.data.table(fecundity.eu_clim |> filter(BA!=0))
+nmin=sp.dataset[BA != 0,.(n = .N),by = species][n == sort(n)[2],n]
+
+# determine centroid
+for (sp in unique(sp.dataset$species)){  #c("sorbusAucupari","fagusSylvatic","abiesAlba","piceaAbies")
+  print(sp)
+  
+  # compute centroid of distribution
+  sp.geodataset <- st_as_sf(sp.dataset[species==sp,], coords = c("lon", "lat"), crs = 4326)
+  sp.centroid <- st_centroid(st_union(sp.geodataset$geometry),ratio=1)
+  # plot(sp.geodataset$geometry)
+  # plot(sp.centroid,add=TRUE,col="red")
+  # n=max(round(dim(sp.dataset[species==sp,])[1]/1000),9)
+ 
+  # create dataset with distance from centroid and sample nmin 
+  df.kmeans=cbind(sp.dataset[species==sp,],
+      dist=as.numeric(st_distance(sp.geodataset,sp.centroid))) |>
+    sample_n(nmin,replace=TRUE)
+  #option for sleection only a the furthest points
+    # filter(dist>quantile(dist,probs=0.85)[[1]])
+    # arrange(desc(dist)) |>
+    # slice(1:(max(500,n()/10)))
+
+
+  # code with k-means algo
+  # kmeans
+  kmeans(df.kmeans[,c("lon","lat")],15)->sum.kmeans
+  ## map clusters
+  print(cbind(df.kmeans,
+        cluster=sum.kmeans$cluster) |>
+    ggplot()+
+    geom_point(aes(x=lon,y=lat,color=as.factor(cluster)))+
+    geom_sf(data=worldmap,fill=NA)+
+    xlim(-10,33)+ylim(37,70) # europe
+      # xlim(-125,-75)+ylim(24,70) # northamerica
+    )
+  ## draw boxplots
+  print(cbind(df.kmeans,
+        cluster=sum.kmeans$cluster) |>
+    group_by(cluster) |>
+    mutate(n.cluster=n(),
+           mean.lat=mean(lat),
+           mean.dist=mean(dist)) |> 
+    ungroup() |>
+    mutate(order.min=dense_rank(mean.dist)) |>
+    filter(order.min==1 | order.min > max(order.min)-3) |>
+    mutate(cluster=forcats::fct_reorder(as.factor(cluster),mean.dist)) |>
+    ggplot(aes(as.factor(cluster),ISP,fill=mean.dist))+
+    geom_boxplot()+
+    scale_y_log10()+
+    ggtitle(label=sp)
+    )
+  }
+
+
+
+rm(sp.dataset,nmin,sp.geodataset,sp.centroid,df.kmeans,eps)
+
+
+```
+
+## Continuous comparison of ISP with geographic distance and latitude
+Tentative de LM et RQ.
+```{r}
+sp.dataset=as.data.table(fecundity.eu_clim |> filter(BA!=0))
+
+
+# determine centroid
+sp.dist=sp.dataset |> 
+  st_as_sf(coords = c("lon", "lat"), crs = 4326) |> 
+  group_by(species) |> 
+  mutate(centroid=st_centroid(st_union(geometry))) |> 
+  mutate(lat=st_coordinates(geometry)[,2],
+         x_centroid=st_coordinates(centroid)[,1],
+         y_centroid=st_coordinates(centroid)[,2]) |> 
+  ungroup() |> 
+  mutate(dist=as.numeric(st_distance(geometry,centroid,by_element = TRUE)))
+
+sp.dist |> 
+  group_by(species) |> 
+  mutate(ISP=scale(ISP),
+         dist=scale(dist)) |> 
+  mutate(dist=cut(dist,
+                  breaks = 10)) |> 
+  ggplot(aes(dist,ISP))+
+  geom_boxplot()+
+  scale_y_log10()+
+  facet_wrap(~species,scales="free")
+
+
+# lat/dist plots
+sp.dist |> 
+  group_by(species) |> 
+  mutate(scale=ISP) |>  
+  mutate(dist=cut(dist,breaks=10),
+         lat=cut(lat,breaks=10)) |> ungroup() |>
+  group_by(species,dist,lat) |> 
+  summarise(mean.fec=mean(ISP)) |> 
+  ggplot(aes(x=dist,y=lat))+
+  geom_tile(aes(fill=log(mean.fec)))+
+  scale_fill_distiller(palette="YlGnBu",direction=1)+
+  facet_wrap(~species,scales="free")
+rm(sp.dist,sp.dataset)
+```
+
+# Fecundity variability with climatic distance to the center 
+
+## Using margins defined with PCA first axis
+
+### ACP
+
+```{r ACPclim}
+# Plot the variables in the first PCA pane for America
+tar_load(c(nfi.eu_clim,nfi.am_clim),store="target_nfi")
+fviz_pca_var(nfi.am_clim$clim_pca, col.var = "contrib", gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"), 
+             repel = TRUE, ggtheme = theme_classic())
+
+# Plot the variables in the first PCA pane for Europe
+fviz_pca_var(nfi.eu_clim$clim_pca, col.var = "contrib", gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"), 
+             repel = TRUE, ggtheme = theme_classic())
+rm(nfi.eu_clim,nfi.am_clim)
+
+```
+
+### Weighted distribution
+```{r}
+# # graph densité fécondité corrigée a chaque marge 
+# fecundity.eu_clim |> 
+#   filter(!is.na(margin)) |> 
+#   filter(ISP!=0) |>
+#   ggplot()+
+#   # geom_boxplot(aes(margin,ISP,weight=cv_plot,color=margin),outlier.colour = NA)+
+#   geom_density(aes(x=ISP,y=..density..,weight=cv_plot,color=margin))+
+#   facet_wrap(~species,scales="free")+
+#   scale_x_log10()+
+#   theme_minimal()
+# 
+# # graph densité fécondité non corrigée a chaque marge 
+# fecundity.eu_clim |> 
+#   filter(!is.na(margin)) |> 
+#   filter(ISP!=0) |>
+#   ggplot()+
+#   geom_boxplot(aes(margin,ISP,weight=cv_plot,color=margin),outlier.colour = NA)+
+#   # geom_density(aes(x=ISP,y=..density..,weight=cv_plot,color=margin))+
+#   facet_wrap(~species,scales="free")+
+#   scale_y_log10()+
+#   theme_minimal()
+
+fecundity.eu_clim |> 
+  filter(!is.na(margin)) |> 
+  filter(ISP!=0) |>
+  ggplot()+
+  geom_boxplot(aes(margin,ISP,color=margin),outlier.colour = NA)+
+  # geom_density(aes(x=ISP,y=..density..,weight=cv_plot,color=margin))+
+  facet_wrap(~species,scales="free")+
+  scale_y_log10()+
+  theme_minimal()+
+  ggtitle(label = "Europe")
+
+# graph densité fécondité corrigée a chaque marge 
+fecundity.am_clim |> 
+  filter(!is.na(margin)) |> 
+  filter(ISP!=0) |>
+  ggplot()+
+  # geom_boxplot(aes(margin,ISP,weight=cv_plot,color=margin),outlier.colour = NA)+
+  geom_density(aes(x=ISP,y=..density..,weight=cv_plot,color=margin))+
+  facet_wrap(~species,scales="free")+
+  scale_x_log10()+
+  theme_minimal()+
+  ggtitle(label="America")
+```
+
+## Delineate margin per species
+
+```{r ACPsp}
+clim_var=c("wai","sgdd")
+# sp="abiesAlba"
+sp="piceaAbies"
+for (sp in unique(fecundity.eu_clim$species)){
+  sp.dataset=as.data.table(fecundity.eu_clim |> filter(BA!=0)) |> select(-PC1,-PC2)
+
+  print(sp)
+  sp.dataset=sp.dataset[species==sp,]
+  clim_pca<-prcomp(sp.dataset[,..clim_var] |> drop_na(),
+                     scale. = TRUE) 
+  print(fviz_pca_biplot(clim_pca,geom=c("point")))
+  sp.pca <- cbind(sp.dataset,
+                  predict(clim_pca, newdata = sp.dataset[,..clim_var])) |> 
+     mutate(margin.sp=case_when(PC1>quantile(PC1,probs=0.95,na.rm=TRUE)[[1]]~"up",
+                                PC1<quantile(PC1,probs=0.05,na.rm=TRUE)[[1]]~"low",
+                                PC1<quantile(PC1,probs=0.525,na.rm=TRUE)[[1]]&
+                                  PC1>quantile(PC1,probs=0.475,na.rm=TRUE)[[1]]~"mid"))
+  # fviz_pca_ind(clim_pca,geom.ind="point")
+  # km.pca=kmeans(sp.pca[,c("PC1","PC2")], centers = 10)
+  # cbind(sp.pca,
+  #       cluster=km.pca$cluster)|> 
+  #   ggplot(aes(PC1,PC2,color=cluster))+geom_point()
+  # cbind(sp.pca,
+  #       cluster=km.pca$cluster)|> 
+  #   ggplot(aes(PC1,PC2,color=cluster))+geom_point()
+
+  # cbind(sp.pca,
+  #       cluster=km.pca$cluster)|> 
+  #   mutate(dist=sqrt(PC1^2+PC2^2)) |> 
+  #   group_by(cluster) |> 
+  #   mutate(mean.dist=mean(dist)) |> ungroup() |> 
+  #   mutate(cluster=forcats::fct_reorder(as.factor(cluster),mean.dist)) |> 
+  #    ggplot()+
+  #   geom_boxplot(aes(as.factor(cluster),ISP,weight=1/cv_plot))+
+  #   theme_minimal()+
+  #   scale_y_log10()
+  print(
+    sp.pca|>
+      ggplot()+
+      geom_point(aes(x=lon,y=lat,color=margin.sp))+
+      geom_sf(data=worldmap,fill=NA)+
+      xlim(-10,33)+ylim(37,70)
+  )
+  print(sp.pca |> 
+    pivot_longer(cols=c("margin","margin.sp"),
+                 names_to="margin",
+                 values_to = "type") |> 
+    filter(!is.na(type)) |> 
+    ggplot()+
+    geom_boxplot(aes(type,ISP,weight=1/cv_plot))+
+    theme_minimal()+
+    scale_y_log10()+
+    ggtitle(label=sp)+
+    facet_wrap(~margin,scale="free_x"))
+}
+
+rm(sp.dataset,clim_pca,sp.pca)
+```
+
+
+## Continous distance - Mahanolinis 
+
+```{r ClimMahanobilis}
+# sp="abiesAlba"
+for(sp in unique(fecundity.eu_clim$species)){
+  fec.sp=fecundity.eu_clim |> 
+    filter(species==sp) |> 
+    filter(!is.na(BA)) |> 
+    mutate(across(c("mat","tmin","map","sgdd","pet","wai"),
+                  scale))
+
+  # geographic centroid and distance
+  points_sp<-st_union(st_as_sf(fec.sp[,c("lon","lat")],coords=c("lon","lat")))
+  centroid_sp<-st_centroid(st_convex_hull(points_sp))
+  # centroid_sp2<-st_centroid(points_sp)
+  fec.sp=cbind(fec.sp,
+               dist_geo=st_distance(st_as_sf(fec.sp[,c("lon","lat")],
+                                             coords=c("lon","lat")),
+                                    centroid_sp))
+  
+  print(
+    fec.sp |> 
+      ggplot(aes(log(ISP),dist_geo))+
+      geom_point(alpha=0.4,stroke=NA)+
+      geom_smooth(method="lm")+
+      ggtitle(label = paste0("geo_",sp))
+  )
+  
+  
+  # estimate climate centroid and distance
+  fec.sp<-fec.sp[,c("lon","lat","margin","dist_geo","BA","ISP","mat","wai","tmin","sgdd")] |> 
+    filter(!is.na(mat)&!is.na(wai)&!is.na(tmin)&!is.na(sgdd))
+  sp.elp=covMcd(fec.sp[,c("mat","wai","tmin","sgdd")],alpha=0.7)
+  sp.center=c(as.matrix(sp.elp$center))
+  
+  fec.sp=cbind(fec.sp,
+               dist_maha=mahalanobis(fec.sp[,c("mat","wai","tmin","sgdd")],
+                                     sp.center,
+                                     cov(fec.sp[,c("mat","wai","tmin","sgdd")] |> drop_na())))
+  
+  
+  
+  print(
+    fec.sp |> 
+      ggplot(aes(log(ISP),dist_maha))+
+      geom_point(alpha=0.4,stroke=NA)+
+      geom_smooth(method="lm")+
+      ggtitle(label = paste0("clim_",sp))
+  )
+    
+  print(
+    fec.sp |>
+      ggplot(aes(margin,dist_maha))+
+      geom_boxplot()
+  )
+
+}
+# fec.sp |> 
+#   ggplot(aes(dist_geo,dist_maha))+geom_point()+geom_smooth()
+# fec.sp |> 
+#   ggplot(aes(margin,dist_maha))+geom_boxplot()
+# fec.sp |> 
+#   ggplot(aes(lat,log(BA)))+geom_point()+geom_smooth(method="lm")
+
+```
+
+
+# Fecundity variability in negative safety margins
+
+```{r sfm}
+
+# load data from first paper
+psi_min=rast(fread("../../Era5-land/output/psihorday_real.csv")[,c("x","y","psi")],crs="epsg:4326")
+frost.index.winter=min(rast("../../Era5-land/data/CHELSA/CHELSA_EUR11_tasmin_month_min_19802005.nc"),na.rm=FALSE)
+species.traits=readRDS("../../Era5-land/target_safetymargin/objects//df.traits") |> 
+  mutate(sp8=paste0(substr(tolower(genus),1,8),substr(str_to_title(species),1,8))) 
+mod.output=readRDS("../../Era5-land/target_analysis/objects/df.mod.select") |> 
+  separate(species.binomial, into=c("genus","sp")) |> 
+  mutate(species=paste0(substr(tolower(genus),1,8),substr(str_to_title(sp),1,8)),
+         t_hsm=na_if(t_hsm,0),
+         t_fsm=na_if(t_fsm,0)) 
+
+# extract safety margins for european nfi and correct it with model uptut
+fec.eu_sfm=cbind(fecundity.eu_clim,
+                 psi=extract(psi_min,data.frame(x=fecundity.eu_clim$lon,
+                                      y=fecundity.eu_clim$lat))[[2]],
+                 frost=extract(frost.index.winter,data.frame(x=fecundity.eu_clim$lon,
+                                      y=fecundity.eu_clim$lat))[[2]]) |> 
+  left_join(species.traits[,c("sp8","px.mu","lt50.mean")],by=c("species"="sp8")) |> 
+  left_join(mod.output[,c("t_fsm","t_hsm","species","mod")],by="species") |> 
+  mutate(hsm=psi-t_hsm*1000-px.mu*1000,
+         fsm=frost-t_fsm-lt50.mean,
+         margin.sm=case_when(mod%in%c("2sm","hsm")&hsm<0~"drought",
+                             mod%in%c("2sm","fsm")&fsm<0~"frost",
+                             mod%in%c("2sm")&hsm<0&fsm<0~"both",
+                             mod%in%c("2sm")&hsm>0&fsm>0~"core",
+                             mod%in%c("hsm")&hsm>0~"core",
+                             mod%in%c("fsm")&fsm>0~"core"))
+
+# graph densité fécondité corrigée a chaque marge 
+fec.eu_sfm |> 
+  filter(!is.na(margin.sm)) |> 
+  filter(ISP!=0) |>
+  ggplot()+
+  # geom_boxplot(aes(margin,ISP,weight=cv_plot,color=margin),outlier.colour = NA)+
+  geom_density(aes(x=ISP,y=..density..,weight=cv_plot,color=margin.sm))+
+  facet_wrap(~species,scales="free")+
+  scale_x_log10()+
+  theme_minimal()+
+  ggtitle(label="Fecundity in negative safety margins")
+
+# redefine core
+fec.eu_sfm |> 
+  filter(!is.na(margin.sm)) |> 
+  filter(ISP!=0) |>
+  group_by(species) |> 
+  mutate(hsm.core=hsm>quantile(hsm,probs=0.8,na.rm=TRUE),
+         fsm.core=fsm>quantile(fsm,probs=0.8,na.rm=TRUE)) |> 
+  filter(!(margin.sm=="core"&hsm.core==FALSE&fsm.core==FALSE)) |> 
+  ggplot()+
+  # geom_boxplot(aes(margin,ISP,weight=cv_plot,color=margin),outlier.colour = NA)+
+  geom_density(aes(x=ISP,y=..density..,weight=cv_plot,color=margin.sm))+
+  facet_wrap(~species,scales="free")+
+  scale_x_log10()+
+  theme_minimal()+
+  ggtitle(label="Fecundity in negative safety margins, tuned core")
+
+
+# graph densité fécondité non corrigée a chaque marge 
+fec.eu_sfm |> 
+  filter(!is.na(margin.sm)) |> 
+  filter(ISP!=0) |>
+  ggplot()+
+  geom_boxplot(aes(margin.sm,ISP,color=margin.sm),outlier.colour = NA)+
+  # geom_density(aes(x=ISP,y=..density..,weight=cv_plot,color=margin))+
+  facet_wrap(~species,scales="free")+
+  scale_y_log10()+
+  theme_minimal()
+
+
+fec.eu_sfm |> 
+  filter(!is.na(margin.sm)) |> 
+  filter(ISP!=0) |> 
+  group_by(species,margin.sm) |> summarise(n=n())
+rm(frost.index.winter,psi_min,mod.output,species.traits,fec.eu_sfm)
+```
+
+# Temporal variability of fecundity
+Petite hésitation sur la méthode de calcul
+```{r temporalvar}
+# load fecGm time serie
+files=list.files("data/europe/")[grepl("fecGmMu-",list.files("data/europe/"))]
+
+
+df.temporal= fecundity.eu_clim |> 
+  select(plot,species,BA,fecGmMu,fecGmSd,lon,lat,CV,mat,tmin,map,sgdd,margin)
+
+for (f in files){
+  load(paste0("data/europe/",f))
+  year=substr(f,9,12)
+  mu=summary |> 
+    as.data.frame() |> 
+    rownames_to_column(var="plot") |> 
+    select(plot,matches(unique(fecundity.eu_clim$species))) |> 
+    pivot_longer(cols=-plot,
+                 names_to = "species",
+                 values_to = paste0("fecGmMu_",year))
+  rm(summary)
+  load(paste0("data/europe/fecGmSd-",year,".rdata"))
+  sd=summary |> 
+    as.data.frame() |> 
+    rownames_to_column(var="plot") |> 
+    select(plot,matches(unique(fecundity.eu_clim$species))) |> 
+    pivot_longer(cols=-plot,
+                 names_to = "species",
+                 values_to = paste0("fecGmSd_",year))
+  df.temporal <- df.temporal |> 
+    left_join(cbind(mu,sd[3]),by=c("plot","species"))
+  rm(summary,mu,sd,year)
+}
+
+# transform to long format
+df.temporal2 <- df.temporal|> 
+  filter(!is.na(margin)) |> 
+  pivot_longer(cols=matches("fecGmMu_"),
+               names_to=c("var","year"),
+               names_sep = "_",
+               values_to="fecYear") |> 
+  pivot_longer(cols=matches("fecGmSd_"),
+               names_to=c("var2","year2"),
+               names_sep = "_",
+               values_to="fecSdYear") |> 
+  filter(year==year2) |> select(-year2)
+
+
+# graph of CV with climatic margin
+df.temporal2 |> 
+  mutate(fecYear=na_if(fecYear,0),
+         fecSdYear=na_if(fecSdYear,0),
+         feccvyear=fecYear/fecSdYear) |> 
+  filter(!is.na(fecYear)) |> filter(!is.na(fecSdYear)) |> 
+  group_by(margin,plot,species) |> 
+  summarise(n_plot=n(),
+         fecGmMu_plot=weighted.mean(fecYear,w=1/feccvyear,na.rm=TRUE), # perform weighted mean of the tree on the plot
+         se_plot=sqrt(sum(fecSdYear^2)/n_plot),
+         cv_plot=se_plot/fecGmMu_plot) |> 
+  ungroup() |> 
+  ggplot()+
+  geom_boxplot(aes(margin,cv_plot,color=margin),outlier.colour = NA)+
+  # geom_density(aes(x=ISP,y=..density..,weight=cv_plot,color=margin))+
+  facet_wrap(~species,scales="free")+
+  scale_y_log10()+
+  theme_minimal()
+df.temporal2 |> 
+  mutate(fecYear=na_if(fecYear,0),
+         fecSdYear=na_if(fecSdYear,0),
+         feccvyear=fecYear/fecSdYear) |> 
+  filter(!is.na(fecYear)) |> filter(!is.na(fecSdYear)) |> 
+  group_by(margin,plot,species) |> 
+  summarise(n_plot=n(),
+         fecGmMu_plot=weighted.mean(fecYear,w=1/feccvyear,na.rm=TRUE), # perform weighted mean of the tree on the plot
+         se_plot2=sqrt(sum(fecSdYear^2)/n_plot),
+         se_plot=sqrt(sum((1/feccvyear)*(fecYear-mean(fecYear,na.rm=TRUE)))/sum(1/feccvyear)),
+         cv_plot=se_plot/fecGmMu_plot) |> 
+  ungroup() |> 
+  ggplot()+
+  geom_boxplot(aes(margin,cv_plot,color=margin),outlier.colour = NA)+
+  # geom_density(aes(x=ISP,y=..density..,weight=cv_plot,color=margin))+
+  facet_wrap(~species,scales="free")+
+  scale_y_log10()+
+  theme_minimal()
+# graph of fecundity in differnet margin (for comparison)
+df.temporal2 |> 
+  mutate(fecYear=na_if(fecYear,0),
+         fecSdYear=na_if(fecSdYear,0),
+         feccvyear=fecYear/fecSdYear) |> 
+  filter(!is.na(fecYear)) |> filter(!is.na(fecSdYear)) |> 
+  group_by(margin,plot,species) |> 
+  summarise(n_plot=n(),
+         fecGmMu_plot=weighted.mean(fecYear,w=1/feccvyear,na.rm=TRUE), # perform weighted mean of the tree on the plot
+         se_plot=sqrt(sum(fecSdYear^2)/n_plot),
+         cv_plot=se_plot/fecGmMu_plot) |> 
+  ungroup() |> 
+  ggplot()+
+  geom_boxplot(aes(margin,fecGmMu_plot,weight=cv_plot,color=margin),outlier.colour = NA)+
+  # geom_density(aes(x=ISP,y=..density..,weight=cv_plot,color=margin))+
+  facet_wrap(~species,scales="free")+
+  scale_y_log10()+
+  theme_minimal()
+
+# both
+# df.temporal2 |> 
+#   mutate(fecYear=na_if(fecYear,0),
+#          fecSdYear=na_if(fecSdYear,0),
+#          feccvyear=fecYear/fecSdYear) |> 
+#   filter(!is.na(fecYear)) |> filter(!is.na(fecSdYear)) |> 
+#   group_by(margin,plot,species) |> 
+#   summarise(n_plot=n(),
+#          fecGmMu_plot=weighted.mean(fecYear,w=1/feccvyear,na.rm=TRUE), # perform weighted mean of the tree on the plot
+#          se_plot=sqrt(sum(fecSdYear^2)/n_plot),
+#          cv_plot=se_plot/fecGmMu_plot) |> 
+#   ungroup() |> 
+#   pivot_longer(cols=c("fecGmMu_plot","cv_plot"),
+#              names_to="var",
+#              values_to = "val") |> 
+#   group_by(species,var) |> mutate(val=scale(val)) |> 
+#   ggplot()+
+#   geom_boxplot(aes(margin,val,color=var),outlier.colour = NA)+
+#   # geom_density(aes(x=ISP,y=..density..,weight=cv_plot,color=margin))+
+#   facet_wrap(~species,scales="free")+
+#   scale_y_log10()+
+#   theme_minimal()
+
+rm(files,df.temporal,df.temporal2)
+```
+
