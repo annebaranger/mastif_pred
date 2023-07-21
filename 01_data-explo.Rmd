@@ -11,7 +11,7 @@ output:
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = FALSE, warning = FALSE,message=FALSE)
 library(targets)
-lapply(c("stringr","ggplot2","tidyr","dplyr","rworldmap","modi","tibble","terra","factoextra","sf"),require,character.only=TRUE)
+lapply(c("stringr","ggplot2","tidyr","dplyr","rworldmap","modi","tibble","terra","factoextra","sf","data.table","viridis","robustbase","taxize"),require,character.only=TRUE)
 theme_set(theme_minimal())
 tar_load(mastif.eu,store="target_data")
 tar_load(mastif.am,store="target_data")
@@ -20,10 +20,26 @@ tar_load(mastif.am,store="target_data")
 
 tar_load(species_selection,store="target_nfi")
 
+# species details-get taxo
+classification(unique(species_selection$df.gbif$species_l),db="ncbi")->out
+class2tree(out,check=FALSE)->out2
+species.phylo=out2$classification |> 
+  rownames_to_column( var = "species_init") |> 
+  mutate(species_l=case_when(is.na(species)~species_init,
+                           TRUE~species)) |> 
+  select(species_l,genus,family,order,class) |> 
+  mutate(taxa=case_when(class=="Pinopsida"~"gymnosperm",
+                        class=="Magnoliopsida"~"angiosperm")) |> 
+  left_join(unique(species_selection$df.gbif[,c("species","species_l")])) |> 
+  unique()
+rm(out,out2)
+
+
 df.mastif.tree=rbind(mastif.am$df.tree,mastif.eu$df.tree) 
 df.species=rbind(mastif.am$df.species.select,mastif.eu$df.species.select)
 sp.select.eu=species_selection$sp.select.eu
 sp.select.am=species_selection$sp.select.am
+
 
 
 # small format of gbif
@@ -31,6 +47,14 @@ df.gbif.short <- species_selection$df.gbif |>
   separate(clim,into = c("clim","range")) |> 
   pivot_wider(names_from = range,
                 values_from = clim_niche)
+
+#compute climate range
+df.range<-species_selection$df.gbif |> 
+    select(species,clim,clim_niche) |> 
+    filter(grepl("range",clim)) |> 
+    separate(clim,into=c("var","drop")) |> 
+    select(-drop) |> 
+    rename(range="clim_niche")
 
 # tar_load(nfi.am_clim,store="target_nfi")
 # tar_load(nfi.eu_clim,store="target_nfi")
@@ -233,31 +257,10 @@ df.tree=rbind(mastif.am$df.tree,mastif.eu$df.tree) |>
     mutate(opt=weighted.quantile(clim_val,1/cv_plot,prob=0.5)[1],
            low=weighted.quantile(clim_val,1/cv_plot,prob=0.025)[1],#,probs=0.1)[1],
            high=weighted.quantile(clim_val,1/cv_plot,prob=0.975)[1],
-           high.rank=quantile(clim_val, probs = 1- min(10, n())/n(), na.rm = TRUE),
-           low.rank=quantile(clim_val, probs = min(10, n())/n(), na.rm = TRUE)) |> 
+           high.rank=weighted.quantile(clim_val,1/cv_plot, prob = 1- min(5, n())/n())[1],
+           low.rank=weighted.quantile(clim_val,1/cv_plot, prob = min(5, n())/n())[1]) |> 
     ungroup()
-# format data for matching
-df.tree |>
-    # format to match df.niche 
-    select(species,clim,low,low.rank,high,high.rank) |> unique() |> 
-    pivot_longer(cols=c("low","high"),names_to = "quant",values_to = "quant_val") |> 
-    pivot_longer(cols=c("low.rank","high.rank"),names_to = "rank",values_to = "rank_val") |> 
-    filter((quant=="low"&rank=="low.rank")|
-             (quant=="high"&rank=="high.rank"))
-    pivot_wider(names_from = "clim",
-                values_from = c("low.rank","high.rank","high","low"),
-                names_sep = ".") |> 
-    pivot_longer(cols=-species,
-                 names_to = "clim",
-                 values_to = "clim_obs") |> 
-    mutate(clim=paste0(str_split_i(clim,"\\.",2),".",str_split_i(clim,"\\.",1))) -> mastif.range
-#compute climate range
-df.range<-species_selection$df.gbif |> 
-    select(species,clim,clim_niche) |> 
-    filter(grepl("range",clim)) |> 
-    separate(clim,into=c("var","drop")) |> 
-    select(-drop) |> 
-    rename(range="clim_niche")
+
 
 # create distribution stat for mastif
 mastif.range=df.tree |> 
@@ -285,7 +288,7 @@ mastif.range |>
   facet_wrap(~clim,scales="free")
 
 # species selection
-mastif.range|> 
+selection=mastif.range|> 
     left_join(species_selection$df.gbif,by=c("species","clim")) |> 
     relocate(species_l,.after=species)|> 
     separate(clim,into=c("var","quant"),remove=FALSE) |> 
@@ -297,15 +300,71 @@ mastif.range|>
     mutate(dif=case_when(grepl("high",clim)~100*(clim_obs-clim_niche)/range,
                          grepl("low",clim)~100*(clim_niche-clim_obs)/range)) |>
     mutate(dif.cat=cut(dif,breaks=c(0,-10,-20,-30,-40,-50,-60,-70,-80,-90,-100))) |> 
-  group_by(species,stat,dif.cat) |>
-    summarise(n=n()) |>
-  pivot_wider(names_from=stat,
-              values_from = n)
-  ggplot(aes(dif.cat,n,colour=species))+
-    theme(legend.position = "none")+
-  geom_point()+
-  facet_wrap(~stat)
+  group_by(species) |>
+  mutate(quant_select=case_when(any(stat=="quant"&dif<(-50))~"quant_excl",
+                             TRUE~"bon"),
+         rank_select=case_when(any(stat=="rank"&dif<(-50))~"rank_excl",
+                             TRUE~"bon")) |> ungroup()
+selection |> 
+  select(species, quant_select,rank_select) |> unique() |> 
+  summarise(n_select=sum(quant_select=="bon"&rank_select=="bon"),
+            n_rank_only=sum(rank_select=="rank_excl"&quant_select=="bon"),
+            n_quant_only=sum(rank_select=="bon"&quant_select=="quant_excl"),
+            n_excl=sum(rank_select=="rank_excl"&quant_select=="quant_excl"))
 
+select.robustness=data.frame(species=unique(df.tree$species),
+                             t_rank=NA,
+                             t_quant=NA)
+for (sp in unique(df.tree$species)){
+  print(sp)
+  tryCatch({
+    selection.sp=mastif.range|> 
+      filter(species==sp) |> 
+      left_join(species_selection$df.gbif,by=c("species","clim")) |> 
+      relocate(species_l,.after=species)|> 
+      separate(clim,into=c("var","quant"),remove=FALSE) |> 
+      relocate(var,.after=species_l) |> 
+    # merge climate range
+      left_join(df.range,by=c("species","var")) |> 
+      filter(!is.na(species_l)) |> 
+    # filter(stat!="rank") |> 
+      mutate(dif=case_when(grepl("high",clim)~100*(clim_obs-clim_niche)/range,
+                           grepl("low",clim)~100*(clim_niche-clim_obs)/range)) |> 
+      filter(!is.na(dif))
+  }, 
+  error=function(e)print("sp not in mastifrange")
+  )
+
+  for (t in seq(0,-100,-5)){
+    print(t)
+    # save t_rank
+    if(any(selection.sp$stat=="rank"&selection.sp$dif<t)){
+      select.robustness[select.robustness$species==sp,
+                        "t_rank"] <- t
+    }
+    if(any(selection.sp$stat=="quant"&selection.sp$dif<t)){
+      select.robustness[select.robustness$species==sp,
+                        "t_quant"] <- t
+    }
+  }
+}
+select.robustness |> 
+  ggplot(aes(t_rank,t_quant,color=species))+geom_point()+
+  geom_abline(slope=1)+
+  theme(legend.position = "none")
+
+# select.robustness |> 
+#   filter(t_quant>(-50)&!is.na(t_quant)) |> pull(species)->select2
+
+select.robustness |> 
+  filter(!is.na(t_quant)) |> 
+  arrange(t_quant,t_rank) |> 
+  mutate(species=factor(species,species)) |> 
+  # mutate(species=forcats::fct_reorder2(as.factor(species),t_rank,t_quant)) |>
+  # mutate(species=forcats::fct_reorder(as.factor(species),t_quant)) |> 
+  pivot_longer(cols=-species) |> 
+  ggplot(aes(value,species,color=name))+
+  geom_point()
 ```
 
 
@@ -715,7 +774,8 @@ fec_trans |>
 ## Test using a continous distance - Mahanolinis distance
 
 ```{r}
-sp="abiesAlba"
+# sp="abiesAlba"
+library(robustbase)
 for(sp in unique(fecundity.eu_clim$species)){
   fec.sp=fecundity.eu_clim |> 
     filter(species==sp) |> 
@@ -1186,6 +1246,883 @@ df.temporal2 |>
  
 ```
 
+# Difference using ks.test
+
+```{r spcomp}
+sp="abiesAlba"
+
+fecundity.eu_clim |> 
+  filter(!is.na(margin)) |> 
+  filter(ISP!=0) |>
+  ggplot()+
+  geom_boxplot(aes(margin,ISP,weight=cv_plot,color=margin),outlier.colour = NA)+
+  # geom_density(aes(x=ISP,y=..density..,weight=cv_plot,color=margin))+
+  facet_wrap(~species,scales="free")+
+  scale_y_log10()+
+  theme_minimal()
+
+sp.margin.dist<- data.frame(
+  species=unique(fecundity.eu_clim$species),
+  low.dist=NA,
+  low.dir=NA,
+  up.dist=NA,
+  up.dir=NA
+)
+for (sp in unique(fecundity.eu_clim$species)){
+  print(sp)
+  sp.density=fecundity.eu_clim |> 
+      filter(species==sp) |> 
+      filter(!is.na(margin)) |> 
+      filter(ISP!=0) |> 
+    as.data.table()
+  print(
+     sp.density|>
+      ggplot()+
+      # geom_boxplot(aes(margin,ISP,weight=cv_plot,color=margin),outlier.colour = NA)+
+      geom_density(aes(x=ISP,y=..density..,weight=cv_plot,color=margin))+
+      facet_wrap(~species,scales="free")+
+      scale_x_log10()+
+      theme_minimal())
+  optlow=ks.test(sp.density[margin=="low",ISP],sp.density[margin=="opt",ISP])
+  lowup=ks.test(sp.density[margin=="low",ISP],sp.density[margin=="up",ISP])
+  optup=ks.test(sp.density[margin=="up",ISP],sp.density[margin=="opt",ISP])
+  print(
+    paste0(
+      c("optlow D : ","optlow pval : "),
+      c(D=optlow$statistic,pval=optlow$p.value)
+    )
+    
+  )
+  print(
+    paste0(
+      c("lowup D : ","lowup pval : "),
+      c(D=lowup$statistic,pval=lowup$p.value)
+    )
+    
+  )
+    print(
+    paste0(
+      c("optup D : ","optup pval : "),
+      c(D=optup$statistic,pval=optup$p.value)
+    )
+    
+  )
+  sp.margin.dist[sp.margin.dist$species==sp,c("low.dist","low.dir","up.dist","up.dir")]=
+    c(
+      optlow$statistic[[1]],
+      ifelse(mean(sp.density[margin=="low",ISP])-mean(sp.density[margin=="opt",ISP])>0,1,-1),
+      optup$statistic[[1]],
+      ifelse(mean(sp.density[margin=="up",ISP])-mean(sp.density[margin=="opt",ISP])>0,1,-1)
+    )
+}
+sp.margin.dist |>
+  left_join(species_selection$df.gbif)  |> 
+  separate(clim,into=c("clim","quant")) |> 
+  # left_join(df.range) |> 
+  filter(quant=="opt") |> select(-quant) |>
+  # mutate(range=range/clim_niche) |> 
+  # pivot_wider(names_from = "var",
+  #             values_from = "range",
+  #             name
+  #             ) |> 
+  # pivot_longer(cols=c("mat","map","tmin","range"),
+  #              names_to="clim",
+  #              values_to = "clim_niche")
+  group_by(clim) |> mutate(clim_niche=scale(clim_niche)) |> 
+  ggplot(aes(color=clim_niche))+
+  geom_segment(aes(x=0,y=0,xend=low.dist*low.dir,yend=up.dist*up.dir),arrow = arrow(length = unit(0.3,"cm")))+
+  geom_text(aes(label=species, x=low.dist*low.dir,y=up.dist*up.dir))+
+  coord_equal()+
+    scale_color_gradientn(colours = viridis(15))+
+  facet_wrap(~clim)
+  
+sp.margin.dist |>
+  left_join(species_selection$df.gbif)  |> 
+  separate(clim,into=c("var","quant")) |> 
+  left_join(df.range) |> 
+  filter(quant=="opt") |> select(-quant) |>
+  mutate(range=range/clim_niche) |> select(-clim_niche) |> 
+  group_by(var) |> mutate(range=scale(range)) |> 
+  ggplot(aes(color=range))+
+  geom_segment(aes(x=0,y=0,xend=low.dist*low.dir,yend=up.dist*up.dir),arrow = arrow(length = unit(0.3,"cm")))+
+  geom_text(aes(label=species, x=low.dist*low.dir,y=up.dist*up.dir))+
+  coord_equal()+
+    scale_color_gradientn(colours = viridis(15))+
+  facet_wrap(~var)
+```
+# Difference using tshd - post-hoc
+
+## Mahanobilis-dist
+
+First we use a continuous climatic distance to determine for which species a trend is identifiable. The species for which the linear model with climatic distance is significant are then investigated by margins, to disentangle specific climatic drivers.
+
+```{r}
+sp="abiesAlba"
+dist.test=data.frame(species=c(unique(fecundity.eu_clim$species),
+                               unique(fecundity.am_clim$species)),
+                       geo.pval=NA,
+                       clim.pval=NA,
+                       zone=c(rep("europe",length(unique(fecundity.eu_clim$species))),
+                              rep("america",length(unique(fecundity.am_clim$species))))
+                     )
+for(sp in dist.test$species){
+  print(sp)
+  # select the accurate occurence data
+  if(dist.test[dist.test$species==sp,"zone"]=="america"){
+    fec.sp=fecundity.am_clim|>
+      filter(species==sp) |>
+      filter(!is.na(BA)) |>
+      mutate(across(c("mat","tmin","map","sgdd","pet","wai"),
+                    scale))
+  } else {
+    fec.sp=fecundity.eu_clim|>
+      filter(species==sp) |>
+      filter(!is.na(BA)) |>
+      mutate(across(c("mat","tmin","map","sgdd","pet","wai"),
+                    scale))
+  }
+
+  # geographic centroid and distance
+  points_sp<-st_union(st_as_sf(fec.sp[,c("lon","lat")],coords=c("lon","lat")))
+  centroid_sp<-st_centroid(st_convex_hull(points_sp))
+  # centroid_sp2<-st_centroid(points_sp)
+  fec.sp=cbind(fec.sp,
+               dist_geo=st_distance(st_as_sf(fec.sp[,c("lon","lat")],
+                                             coords=c("lon","lat")),
+                                    centroid_sp))
+  
+  print(
+    fec.sp |> 
+      ggplot(aes(log(ISP),dist_geo))+
+      geom_point(alpha=0.4,stroke=NA)+
+      geom_smooth(method="lm")+
+      ggtitle(label = paste0("geo_",sp))
+  )
+  
+  dist.test[dist.test$species==sp,"geo.pval"]=
+    as.data.table(summary(lm(log(ISP)~dist_geo,data=fec.sp ))$coefficients)[2,"Pr(>|t|)"][[1]]
+  
+  # estimate climate centroid and distance
+  fec.sp<-fec.sp[,c("lon","lat","margin","dist_geo","BA","ISP","mat","tmin","map","sgdd","pet","wai")] |> 
+    filter(!is.na(mat)&!is.na(wai)&!is.na(tmin)&!is.na(sgdd))
+  sp.elp=covMcd(fec.sp[,c("mat","tmin","map","sgdd","pet","wai")],alpha=0.7)
+  sp.center=c(as.matrix(sp.elp$center))
+  
+  fec.sp=cbind(fec.sp,
+               dist_maha=mahalanobis(fec.sp[,c("mat","tmin","map","sgdd","pet","wai")],
+                                     sp.center,
+                                     cov(fec.sp[,c("mat","tmin","map","sgdd","pet","wai")] |>
+                                           drop_na())
+                                     )
+               )
+  
+  print(
+    fec.sp |> 
+      ggplot(aes(log(ISP),dist_maha))+
+      geom_point(alpha=0.4,stroke=NA)+
+      geom_smooth(method="lm")+
+      ggtitle(label = paste0("clim_",sp))
+  )
+    
+  # print(
+  #   fec.sp |>
+  #     ggplot(aes(margin,dist_maha))+
+  #     geom_boxplot()
+  # )
+  
+  print(summary(lm(log(ISP)~dist_maha,data=fec.sp )))
+  dist.test[dist.test$species==sp,"clim.pval"]=
+    as.data.table(summary(lm(log(ISP)~dist_maha,data=fec.sp ))$coefficients)[2,"Pr(>|t|)"][[1]]
+}
+
+# fec.sp |> 
+#   ggplot(aes(dist_geo,dist_maha))+geom_point()+geom_smooth()
+# fec.sp |> 
+#   ggplot(aes(margin,dist_maha))+geom_boxplot()
+# fec.sp |> 
+#   ggplot(aes(lat,log(BA)))+geom_point()+geom_smooth(method="lm")
+
+```
+
+
+
+## Compute margins diff
+The idea is the for n zone delimitated in the distribution of each species , there are (n-1)^3 possible variations of the fecundity in its niche (higher, lower or equal than the core distribution).
+We can make different types of zone in the distribution of the species :
+
+* two extremes of the PCA axis
+* extremes of two major acp
+* defined number of classes on a climatic distance gradient
+
+We propose to test margins for species for which continuous climatic distance was significant.
+
+### Europe
+
+```{r}
+sp.dataset=fecundity.eu_clim |>
+  filter(BA!=0) |> 
+  group_by(species) |> 
+  mutate(margin.sgdd=case_when(sgdd<weighted.quantile(sgdd,w=1/cv_plot, prob=0.05)[[1]]~"cold",
+                               sgdd<weighted.quantile(sgdd,w=1/cv_plot, prob=0.525)[[1]]&
+                                 sgdd>weighted.quantile(sgdd,w=1/cv_plot, prob=0.475)[[1]]~"midtemp",
+                               sgdd>weighted.quantile(sgdd,w=1/cv_plot, prob=0.95)[[1]]~"hot"),
+         margin.wai=case_when(wai<weighted.quantile(wai,w=1/cv_plot, prob=0.05)[[1]]~"arid",
+                              wai<weighted.quantile(wai,w=1/cv_plot, prob=0.525)[[1]]&
+                                 wai>weighted.quantile(wai,w=1/cv_plot, prob=0.475)[[1]]~"midhum",
+                               wai>weighted.quantile(wai,w=1/cv_plot, prob=0.95)[[1]]~"humid")) |> 
+  pivot_longer(cols=c("margin.sgdd","margin.wai"),
+               names_to="margin.type",
+               values_to="margin.val") |> 
+  filter(!is.na(margin.val)) |> 
+  ungroup() |> 
+  mutate(margin.val=factor(margin.val,levels=c("midtemp","cold","hot","midhum","arid","humid"))) |> 
+  as.data.table()
+
+# boxplot for each margin types
+sp.dataset |> 
+  left_join(dist.test) |> 
+  mutate(signif.clim=clim.pval<0.05) |> 
+  ggplot()+
+  geom_boxplot(aes(margin.val,ISP,weight=cv_plot,color=signif.clim,fill=margin.type),outlier.colour = NA)+
+  # geom_density(aes(x=ISP,y=..density..,weight=cv_plot,color=margin))+
+  facet_wrap(~species,scales="free")+
+  scale_y_log10()+
+  scale_colour_manual(values=c("grey","black"))
+
+# density for margin.sgdd
+sp.dataset |>
+  group_by(species) |>
+  mutate(ISP=scale(log(ISP))) |>
+  ungroup() |>
+  filter(margin.type=="margin.sgdd") |>
+  ggplot(aes(ISP,color=margin.val))+
+  geom_density()+
+  facet_wrap(~species,scales="free_x")
+
+# check for common points in margin delineation
+sp.dataset |> 
+  pivot_wider(names_from = margin.type,
+              values_from = margin.val) |> 
+  count(margin.sgdd,margin.wai) |> 
+  ggplot(aes(margin.sgdd,margin.wai,fill=log(n)))+
+  geom_tile()
+
+# sp.dataset |> 
+#   pivot_wider(names_from = margin.type,
+#               values_from = margin.val) |> 
+#   filter(!is.na(margin.sgdd)) |>
+#   group_by(species,margin.sgdd) |> 
+#   summarise(mean.sgdd=mean(sgdd)) -> sgdd.zone.eu
+```
+
+
+```{r}
+# sp="abiesAlba"       
+margin.test=data.frame(species=unique(fecundity.eu_clim$species),
+                       sgdd.dif=FALSE,
+                       sgdd.up=NA,
+                       sgdd.low=NA,
+                       wai.dif=FALSE,
+                       wai.up=NA,
+                       wai.low=NA,
+                       zone="europe")
+for (sp in unique(fecundity.eu_clim$species)){
+  print(sp)
+  df.sp=sp.dataset|> 
+    filter(species==sp) |> 
+    mutate(ISP=scale(log(ISP))) |>
+    as.data.table()
+  mod=aov(lm(ISP~margin.val,data=df.sp[margin.type=="margin.sgdd"],weights=1/cv_plot))
+  if(summary(mod)[[1]]$`Pr(>F)`[1]<0.001){
+    margin.test[margin.test$species==sp,"sgdd.dif"]=TRUE
+    thsd=TukeyHSD(mod,"margin.val")
+    if(thsd$margin.val["hot-midtemp","p adj"]<0.05){
+      margin.test[margin.test$species==sp,"sgdd.up"]=thsd$margin.val["hot-midtemp","diff"]
+    }
+    if(thsd$margin.val["cold-midtemp","p adj"]<0.05){
+      margin.test[margin.test$species==sp,"sgdd.low"]=thsd$margin.val["cold-midtemp","diff"]
+    }
+  }
+  mod=aov(lm(ISP~margin.val,data=df.sp[margin.type=="margin.wai"],weights=1/cv_plot))
+  if(summary(mod)[[1]]$`Pr(>F)`[1]<0.001){
+    margin.test[margin.test$species==sp,"wai.dif"]=TRUE
+    thsd=TukeyHSD(mod,"margin.val")
+    if(thsd$margin.val["arid-midhum","p adj"]<0.05){
+      margin.test[margin.test$species==sp,"wai.low"]=thsd$margin.val["arid-midhum","diff"]
+    }
+    if(thsd$margin.val["humid-midhum","p adj"]<0.05){
+      margin.test[margin.test$species==sp,"wai.up"]=thsd$margin.val["humid-midhum","diff"]
+    }
+  }
+}
+# 1 h>m>c
+# 2 h>m=c
+# 3 h=m>c
+# 4 m>c & m>h
+# 5 m<c & m<h
+# 6 m=c=h
+# 7 h<m=c
+# 8 h=m<c
+# 9 h<m<c
+
+margin.test |> 
+  mutate(fec.sgdd=case_when(sgdd.up>0&sgdd.low<0~1,
+                           sgdd.up>0&is.na(sgdd.low)~2,
+                           is.na(sgdd.up)&sgdd.low<0~3,
+                           sgdd.up<0&sgdd.low<0~4,
+                           sgdd.up>0&sgdd.low>0~5,
+                           is.na(sgdd.up)&is.na(sgdd.low)~6,
+                           sgdd.up<0&is.na(sgdd.low)~7,
+                           is.na(sgdd.up)&sgdd.low>0~8,
+                           sgdd.up<0&sgdd.low>0~9)) |>
+  mutate(fec.wai=case_when(wai.up>0&wai.low<0~1,
+                           wai.up>0&is.na(wai.low)~2,
+                           is.na(wai.up)&wai.low<0~3,
+                           wai.up<0&wai.low<0~4,
+                           wai.up>0&wai.low>0~5,
+                           is.na(wai.up)&is.na(wai.low)~6,
+                           wai.up<0&is.na(wai.low)~7,
+                           is.na(wai.up)&wai.low>0~8,
+                           wai.up<0&wai.low>0~9)) |>
+  ggplot(aes(as.factor(fec.wai)))+geom_bar()
+
+
+# as.data.frame(table(margin.test$fec.wai))$Freq
+# chisq.test(as.data.frame(table(margin.test$fec.wai))$Freq)
+# sgdd.zone.eu |> 
+#   left_join(margin.test) |> 
+#   select(species,margin.sgdd,mean.sgdd,sgdd.dif,sgdd.up,sgdd.low,zone)->test.lm
+# 
+# summary(lm(sgdd.up~mean.sgdd,data=test.lm |> filter(margin.sgdd=="hot")))
+# 
+# test.lm |> 
+#   filter(margin.sgdd=="hot") |> 
+#   ggplot(aes(mean.sgdd,sgdd.up))+
+#   geom_point()+
+#   geom_smooth()
+```
+
+
+### America
+
+```{r}
+sp.dataset=fecundity.am_clim |>
+  filter(BA!=0) |> 
+  group_by(species) |> 
+  mutate(cv_plot=if_else(is.na(cv_plot),mean(cv_plot,na.rm=TRUE),cv_plot)) |> 
+  mutate(margin.sgdd=case_when(sgdd<weighted.quantile(sgdd,w=1/cv_plot, prob=0.05)[[1]]~"cold",
+                               sgdd<weighted.quantile(sgdd,w=1/cv_plot, prob=0.525)[[1]]&
+                                 sgdd>weighted.quantile(sgdd,w=1/cv_plot, prob=0.475)[[1]]~"midtemp",
+                               sgdd>weighted.quantile(sgdd,w=1/cv_plot, prob=0.95)[[1]]~"hot"),
+         margin.wai=case_when(wai<weighted.quantile(wai,w=1/cv_plot, prob=0.05)[[1]]~"arid",
+                              wai<weighted.quantile(wai,w=1/cv_plot, prob=0.525)[[1]]&
+                                 wai>weighted.quantile(wai,w=1/cv_plot, prob=0.475)[[1]]~"midhum",
+                               wai>weighted.quantile(wai,w=1/cv_plot, prob=0.95)[[1]]~"humid")) |> 
+  pivot_longer(cols=c("margin.sgdd","margin.wai"),
+               names_to="margin.type",
+               values_to="margin.val") |> 
+  filter(!is.na(margin.val)) |> 
+  ungroup() |> 
+  mutate(margin.val=factor(margin.val,levels=c("midtemp","cold","hot","midhum","arid","humid"))) |> 
+  as.data.table()
+
+sp.dataset |> 
+  left_join(dist.test) |> 
+  mutate(signif.clim=clim.pval<0.05) |> 
+  ggplot()+
+  geom_boxplot(aes(margin.val,ISP,weight=cv_plot,color=signif.clim,fill=margin.type),outlier.colour = NA)+
+  # geom_density(aes(x=ISP,y=..density..,weight=cv_plot,color=margin))+
+  facet_wrap(~species,scales="free")+
+  scale_y_log10()+
+  scale_colour_manual(values=c("grey","black"))
+
+sp.dataset |> 
+  pivot_wider(names_from = margin.type,
+              values_from = margin.val) |> 
+  count(margin.sgdd,margin.wai) |> 
+  ggplot(aes(margin.sgdd,margin.wai,fill=log(n)))+
+  geom_tile()
+
+# car::Anova(lm(ISP~species*margin.val,data=sp.dataset |> filter(margin.type=="margin.sgdd")))
+```
+
+
+```{r}
+# save eu data somewhere
+margin.test.eu=margin.test
+
+# sp="abiesAlba"       
+margin.test=rbind(margin.test,
+                  data.frame(species=unique(fecundity.am_clim$species),
+                       sgdd.dif=FALSE,
+                       sgdd.up=NA,
+                       sgdd.low=NA,
+                       wai.dif=FALSE,
+                       wai.up=NA,
+                       wai.low=NA,
+                       zone="america")) |> 
+    left_join(dist.test) |>   mutate(signif.clim=clim.pval<0.05) 
+for (sp in unique(fecundity.am_clim$species)){
+  print(sp)
+  df.sp=sp.dataset|> 
+    filter(species==sp) |> 
+    mutate(ISP=scale(log(ISP))) |>
+    as.data.table()
+  mod=aov(lm(ISP~margin.val,data=df.sp[margin.type=="margin.sgdd"],weights=1/cv_plot))
+  if(summary(mod)[[1]]$`Pr(>F)`[1]<0.001){
+    margin.test[margin.test$species==sp,"sgdd.dif"]=TRUE
+    thsd=TukeyHSD(mod,"margin.val")
+    if(thsd$margin.val["hot-midtemp","p adj"]<0.05){
+      margin.test[margin.test$species==sp,"sgdd.up"]=thsd$margin.val["hot-midtemp","diff"]
+    }
+    if(thsd$margin.val["cold-midtemp","p adj"]<0.05){
+      margin.test[margin.test$species==sp,"sgdd.low"]=thsd$margin.val["cold-midtemp","diff"]
+    }
+  }
+  mod=aov(lm(ISP~margin.val,data=df.sp[margin.type=="margin.wai"],weights=1/cv_plot))
+  if(summary(mod)[[1]]$`Pr(>F)`[1]<0.001){
+    margin.test[margin.test$species==sp,"wai.dif"]=TRUE
+    thsd=TukeyHSD(mod,"margin.val")
+    if(thsd$margin.val["arid-midhum","p adj"]<0.05){
+      margin.test[margin.test$species==sp,"wai.low"]=thsd$margin.val["arid-midhum","diff"]
+    }
+    if(thsd$margin.val["humid-midhum","p adj"]<0.05){
+      margin.test[margin.test$species==sp,"wai.up"]=thsd$margin.val["humid-midhum","diff"]
+    }
+  }
+}
+# 1 h>m>c
+# 2 h>m=c
+# 3 h=m>c
+# 4 m>c & m>h
+# 5 m<c & m<h
+# 6 m=c=h
+# 7 h<m=c
+# 8 h=m<c
+# 9 h<m<c
+margin.test |> 
+  mutate(fec.sgdd=case_when(sgdd.up>0&sgdd.low<0~1,
+                           sgdd.up>0&is.na(sgdd.low)~2,
+                           is.na(sgdd.up)&sgdd.low<0~3,
+                           sgdd.up<0&sgdd.low<0~4,
+                           sgdd.up>0&sgdd.low>0~5,
+                           is.na(sgdd.up)&is.na(sgdd.low)~6,
+                           sgdd.up<0&is.na(sgdd.low)~7,
+                           is.na(sgdd.up)&sgdd.low>0~8,
+                           sgdd.up<0&sgdd.low>0~9)) |>
+  mutate(fec.wai=case_when(wai.up>0&wai.low<0~1,
+                           wai.up>0&is.na(wai.low)~2,
+                           is.na(wai.up)&wai.low<0~3,
+                           wai.up<0&wai.low<0~4,
+                           wai.up>0&wai.low>0~5,
+                           is.na(wai.up)&is.na(wai.low)~6,
+                           wai.up<0&is.na(wai.low)~7,
+                           is.na(wai.up)&wai.low>0~8,
+                           wai.up<0&wai.low>0~9)) |>
+  ggplot(aes(as.factor(fec.sgdd),fill=zone))+geom_bar(position="dodge")
+rm(margin.test.eu,mod,thsd,sp,df.sp,sp.dataset)
+```
+
+## analysis all species together
+
+```{r}
+# all together, color = continent
+margin.test |>
+  mutate(across(c("sgdd.up","sgdd.low"),
+                ~if_else(is.na(.x),0,.x))) |> 
+  ggplot(aes(color=zone))+
+  geom_segment(aes(x=0,y=0,xend=sgdd.low,yend=sgdd.up),arrow = arrow(length = unit(0.3,"cm")))+
+  geom_text(aes(label=species, x=sgdd.low,y=sgdd.up))+
+  coord_equal()
+
+
+# color by climate, sgdd
+margin.test |>
+  left_join(species_selection$df.gbif)  |> 
+  separate(clim,into=c("clim","quant")) |> 
+  filter(quant=="opt") |> select(-quant) |>
+  mutate(across(c("sgdd.up","sgdd.low"),
+                ~if_else(is.na(.x),0,.x))) |> 
+  group_by(clim) |> mutate(clim_niche=scale(clim_niche)) |> 
+  ggplot(aes(color=clim_niche))+
+  geom_segment(aes(x=0,y=0,xend=sgdd.low,yend=sgdd.up),arrow = arrow(length = unit(0.3,"cm")))+
+  geom_text(aes(label=species, x=sgdd.low,y=sgdd.up))+
+  coord_equal()+
+    scale_color_gradientn(colours = viridis(15))+
+  facet_wrap(~clim)
+
+# color by climate, wai
+margin.test |>
+  left_join(species_selection$df.gbif)  |> 
+  separate(clim,into=c("clim","quant")) |> 
+  filter(quant=="opt") |> select(-quant) |>
+  mutate(across(c("wai.up","wai.low"),
+                ~if_else(is.na(.x),0,.x))) |> 
+  group_by(clim) |> mutate(clim_niche=scale(clim_niche)) |> 
+  ggplot(aes(color=clim_niche))+
+  geom_segment(aes(x=0,y=0,xend=wai.low,yend=wai.up),arrow = arrow(length = unit(0.3,"cm")))+
+  geom_text(aes(label=species, x=wai.low,y=wai.up))+
+  coord_equal()+
+    scale_color_gradientn(colours = viridis(15))+
+  facet_wrap(~clim)
+
+# color by range width, sgdd
+cowplot::plot_grid(
+  plotlist = lapply(X=c("map","mat","tmin"),
+                    function(x){
+                      p=margin.test |>
+                        mutate(across(c("sgdd.up","sgdd.low"),
+                                      ~if_else(is.na(.x),0,.x))) |>
+                        left_join(species_selection$df.gbif)  |>
+                        separate(clim,into=c("var","quant")) |>
+                        left_join(df.range) |>
+                        filter(quant=="opt") |> select(-quant) |>
+                        mutate(range=abs(range/clim_niche)) |> select(-clim_niche) |>
+                        filter(var==x) |> 
+                        ggplot(aes(color=range))+
+                        geom_point(aes(x=sgdd.low,y=sgdd.up),size=2)+
+                        # geom_segment(aes(x=0,y=0,xend=sgdd.low,yend=sgdd.up),arrow = arrow(length = unit(0.3,"cm")))+
+                        # geom_text(aes(label=species, x=sgdd.low,y=sgdd.up))+
+                        coord_equal()+
+                        scale_color_viridis(option="C",trans="log")+
+                        ggtitle(label = x)
+                      return(p)
+                      }
+                    ),
+  ncol=3
+  )
+
+
+margin.test|>
+  mutate(across(c("sgdd.up","sgdd.low"),
+                ~if_else(is.na(.x),0,.x))) |> 
+  ggplot(aes(x=sgdd.low,y=sgdd.up))+
+  # stat_density_2d(aes(fill = stat(level)),
+  #                 geom = "polygon", 
+  #                 n = 100 ,
+  #                 bins = 10) + 
+  stat_density_2d(aes(fill = ..level..), geom = "polygon")+
+  geom_point(aes(color=zone),position=position_jitter(width = 0.1, height = 0.1))+
+  scale_fill_viridis(option = "D")+
+  coord_equal()
+
+cluster=kmeans(margin.test|>
+         mutate(across(c("sgdd.up","sgdd.low"),
+                       ~if_else(is.na(.x),0,.x))) |> 
+         select(sgdd.up,sgdd.low),
+       3)$cluster
+
+margin.test |> 
+  mutate(across(c("sgdd.up","sgdd.low"),
+              ~if_else(is.na(.x),0,.x))) |>
+  left_join(species.phylo[,c("species","taxa")]) |> 
+  left_join(dist.test) |> 
+  cbind(cluster=as.factor(cluster)) |> 
+  ggplot(aes(x=sgdd.low,y=sgdd.up,color=signif.clim))+ #cluster # taxa
+  # stat_density_2d(aes(fill = stat(level)),
+  #                 geom = "polygon", 
+  #                 n = 100 ,
+  #                 bins = 10) + 
+  geom_point(position=position_jitter(width = 0.07, height = 0.07))+
+  stat_ellipse()+
+  coord_equal()
+
+margin.test |> 
+  pivot_longer(cols=c("sgdd.up","sgdd.low","wai.up","wai.low")) |> 
+  mutate(across(value,
+            ~if_else(is.na(.x),0,.x))) |> 
+  group_by(name) |> 
+  mutate(median=mean(value)) |> 
+  left_join(species.phylo[,c("species","taxa")]) |> 
+  ggplot(aes(value,color=zone))+
+  geom_density()+
+  geom_vline(aes(xintercept = median))+
+  facet_wrap(~name)
+
+# test des distribtuibs
+margin.test |> 
+  mutate(fec.sgdd=case_when(sgdd.up>0&sgdd.low<0~1,
+                           sgdd.up>0&is.na(sgdd.low)~2,
+                           is.na(sgdd.up)&sgdd.low<0~3,
+                           sgdd.up<0&sgdd.low<0~4,
+                           sgdd.up>0&sgdd.low>0~5,
+                           is.na(sgdd.up)&is.na(sgdd.low)~6,
+                           sgdd.up<0&is.na(sgdd.low)~7,
+                           is.na(sgdd.up)&sgdd.low>0~8,
+                           sgdd.up<0&sgdd.low>0~9)) |>
+  mutate(fec.wai=case_when(wai.up>0&wai.low<0~1,
+                           wai.up>0&is.na(wai.low)~2,
+                           is.na(wai.up)&wai.low<0~3,
+                           wai.up<0&wai.low<0~4,
+                           wai.up>0&wai.low>0~5,
+                           is.na(wai.up)&is.na(wai.low)~6,
+                           wai.up<0&is.na(wai.low)~7,
+                           is.na(wai.up)&wai.low>0~8,
+                           wai.up<0&wai.low>0~9)) ->margin.test
+
+
+as.data.frame(table(margin.test$fec.wai))$Freq
+chisq.test(as.data.frame(table(margin.test$fec.sgdd))$Freq)
+chisq.test(as.data.frame(table(margin.test$fec.wai))$Freq)
+
+```
+
+
+Conclusion : On observe une répartition dans les 9 classes de sgdd et wai différentes de ce qui aurait été observé par hasard.  2 grandes tendances se détachent. D'une part pour un grand pool d'espèce, la fécondité ne varie pas dans la distribution. D'autre part, pour la grande majorité des espcèces où une variation est visible, on observe que la fécondité tend a diminuer vers la marge froide et augmenter vers la marge chaude.
+Pas de différence falgrante entre gymnospermes/angiospermes/
+
+
+## Disentangling fecundity variation
+
+Question subsidiaires:
+- les variations sont-elles plus importantes sur l'une ou l'autre des dimensions climatiques?
+
+
+- les variations vont-elles davantage dans un sens ? 
+-> il smeble que la fecundité diminue dans la marge froide de manière systématique. par clair pour les autres marges.
+
+- les varaitions s'expliquent-elles par des caractéristiques des distributions (climat moyen associé a la dimension climatique, largeur de la niche acp?)
+-> uniquement la largeur du range permet d'expliquer un peu la variation de sgdd.up
+
+
+- par des traits (ie. stratégies de croissance? shade tolerance)?
+
+### clim
+```{r}
+# test if variation are significantly different from zero
+t.test(margin.test$sgdd.low)
+t.test(margin.test$sgdd.up)
+t.test(margin.test$wai.low)
+t.test(margin.test$wai.up)
+
+# compute niche characteristcis
+rbind(fecundity.am_clim,
+      fecundity.eu_clim)|>
+  filter(BA!=0) |> 
+  group_by(species) |> 
+  mutate(cv_plot=if_else(is.na(cv_plot),mean(cv_plot,na.rm=TRUE),cv_plot)) |> 
+  # compute mean clim per species
+  mutate(sgdd.range=weighted.quantile(sgdd,w=1/cv_plot, prob=0.95)[[1]]-weighted.quantile(sgdd,w=1/cv_plot, prob=0.05)[[1]],
+         wai.range=weighted.quantile(wai,w=1/cv_plot, prob=0.95)[[1]]-weighted.quantile(wai,w=1/cv_plot, prob=0.05)[[1]],
+         sgdd.mean=weighted.mean(sgdd,w=1/cv_plot,na.rm=TRUE)[[1]],
+         wai.mean=weighted.mean(wai,w=1/cv_plot,na.rm=TRUE)[[1]]
+         ) |> 
+  # compute margins
+  mutate(margin.sgdd=case_when(sgdd<weighted.quantile(sgdd,w=1/cv_plot, prob=0.05)[[1]]~"cold",
+                             sgdd<weighted.quantile(sgdd,w=1/cv_plot, prob=0.525)[[1]]&
+                               sgdd>weighted.quantile(sgdd,w=1/cv_plot, prob=0.475)[[1]]~"midtemp",
+                             sgdd>weighted.quantile(sgdd,w=1/cv_plot, prob=0.95)[[1]]~"hot"),
+        margin.wai=case_when(wai<weighted.quantile(wai,w=1/cv_plot, prob=0.05)[[1]]~"arid",
+                            wai<weighted.quantile(wai,w=1/cv_plot, prob=0.525)[[1]]&
+                               wai>weighted.quantile(wai,w=1/cv_plot, prob=0.475)[[1]]~"midhum",
+                             wai>weighted.quantile(wai,w=1/cv_plot, prob=0.95)[[1]]~"humid")) |> 
+  pivot_longer(cols=c("margin.sgdd","margin.wai"),
+               names_to="margin.type",
+               values_to="margin.val") |> 
+  filter(!is.na(margin.val)) |> 
+  ungroup() |> group_by(species,margin.val) |> 
+  # compute mean per species and margins
+  mutate(margin.sgdd=weighted.mean(sgdd,w=1/cv_plot,na.rm=TRUE)[[1]],
+         margin.wai=weighted.mean(wai,w=1/cv_plot,na.rm=TRUE)[[1]]) |> 
+  select(species,sgdd.range,sgdd.mean,wai.range,wai.mean,margin.type,margin.val,margin.sgdd,margin.wai) |> 
+  ungroup() |> 
+  unique() |> 
+  left_join(margin.test) |> 
+  mutate(across(c("sgdd.up","sgdd.low","wai.up","wai.low"),
+                       ~if_else(is.na(.x),0,.x))) |> 
+  left_join(species.phylo[,c("species","taxa")])-> test.lm
+sp.dataset |> 
+  pivot_wider(names_from = margin.type,
+              values_from = margin.val) |> 
+  filter(!is.na(margin.sgdd)) |>
+  group_by(species,margin.sgdd) |> 
+  summarise(mean.sgdd=mean(sgdd)) -> sgdd.zone.am
+
+sgdd.zone.am |> 
+  left_join(margin.test) |> 
+  select(species,margin.sgdd,mean.sgdd,sgdd.dif,sgdd.up,sgdd.low,zone)->test.lm
+library(car)
+anova(lm(sgdd.up~sgdd.mean,data=test.lm |> select(taxa,sgdd.up,sgdd.mean) |> unique()))
+anova(lm(sgdd.up~sgdd.range*taxa,data=test.lm |> select(taxa,sgdd.up,sgdd.range) |> unique()))
+anova(lm(sgdd.low~sgdd.mean,data=test.lm |> select(taxa,sgdd.low,sgdd.mean) |> unique()))
+anova(lm(sgdd.low~sgdd.range,data=test.lm |> select(taxa,sgdd.low,sgdd.range) |> unique()))
+anova(lm(sgdd.up~margin.sgdd,data=test.lm |> filter(margin.val=="hot") |> select(taxa,sgdd.up,margin.sgdd) |> unique()))
+anova(lm(sgdd.low~margin.sgdd,data=test.lm |> filter(margin.val=="cold") |> select(taxa,sgdd.low,margin.sgdd) |> unique()))
+
+anova(lm(wai.up~wai.mean,data=test.lm |> select(wai.up,wai.mean) |> unique()))
+anova(lm(wai.up~wai.range,data=test.lm |> select(wai.up,wai.range) |> unique()))
+anova(lm(wai.low~wai.mean,data=test.lm |> select(wai.low,wai.mean) |> unique()))
+anova(lm(wai.low~wai.range,data=test.lm |> select(wai.low,wai.range) |> unique()))
+anova(lm(wai.up~margin.wai,data=test.lm |> filter(margin.val=="hot") |> select(wai.up,margin.wai) |> unique()))
+anova(lm(wai.low~margin.wai,data=test.lm |> filter(margin.val=="cold") |> select(wai.low,margin.wai) |> unique()))
+
+
+test.lm |>
+  select(sgdd.up,sgdd.range) |> unique() |> 
+  # filter(sgdd.up!=0) |> 
+  ggplot(aes(sgdd.up,sgdd.range))+
+  geom_point()+
+  geom_smooth(method="lm")
+```
+### traits
+
+```{r}
+try.traits<-read.csv2("data/TRY/Species_mean_traits.csv") |> 
+  filter(Species.name.standardized.against.TPL %in% unique(species_selection$df.gbif$species_l)) |>
+  separate(Species.name.standardized.against.TPL,into=c("genus","sp"),sep=" ",remove=FALSE) |> 
+  mutate(species=paste0(substr(tolower(genus),1,8),substr(str_to_title(sp),1,8))) |> 
+  select(-genus) |> 
+  rename_all(tolower) |> 
+  rename(leaf.area=leaf.area..mm2.,
+         leaf.area.n=leaf.area..n.o..,
+         nmass=nmass..mg.g.,
+         nmass.n=nmass..n.o..,
+         lma=lma..g.m2.,
+         lma.n=lma..n.o..,
+         plant.height=plant.height..m.,
+         plant.height.n=plant.height..n.o..,
+         diaspore.mass=diaspore.mass..mg.,
+         diaspore.mass.n=diaspore.mass..n.o..,
+         ssd=ssd.observed..mg.mm3.,
+         ssd.n=ssd..n.o..,
+         ldmc=ldmc..g.g.,
+         ldmc.n=ldmc..n.o..,
+         ssd.imputed=ssd.imputed..mg.mm3.,
+         ssd.combined=ssd.combined..mg.mm3.,
+         n.trait=number.of.traits.with.values) |> 
+  select(species,family,phylogenetic.group.general,growth.form,leaf.type,leaf.area,nmass,lma,plant.height,ssd)
+
+
+margin.test |>
+  # mutate(across(c("sgdd.up","sgdd.low","wai.up","wai.low"),
+  #                      ~if_else(is.na(.x),0,.x))) |> 
+  left_join(try.traits) |>
+  pivot_longer(cols=c("leaf.area","nmass","lma","plant.height","ssd"),
+               names_to = "traits",
+               values_to = "traits.val") |> 
+  pivot_longer(col=c("sgdd.up","sgdd.low","wai.up","wai.low"),
+               names_to = "margin.dist",
+               values_to = "margin.dist.val") |> 
+  ggplot(aes(margin.dist.val,traits.val,color=phylogenetic.group.general))+
+  geom_point()+
+  geom_smooth(method="lm")+
+  facet_wrap(margin.dist~traits,scales="free")
+
+
+
+margin.test |>
+  # mutate(across(c("sgdd.up","sgdd.low","wai.up","wai.low"),
+  #                      ~if_else(is.na(.x),0,.x))) |> 
+  left_join(try.traits) |>
+  pivot_longer(cols=c("phylogenetic.group.general","growth.form","leaf.type"),
+               names_to = "traits",
+               values_to = "traits.val") |> 
+  pivot_longer(col=c("sgdd.up","sgdd.low","wai.up","wai.low"),
+               names_to = "margin.dist",
+               values_to = "margin.dist.val") |> 
+  ggplot(aes(margin.dist.val,traits.val))+
+  geom_boxplot()+
+  geom_smooth(method="lm")+
+  facet_wrap(margin.dist~traits,scales="free")
+
+for (margin in c("sgdd.up","sgdd.low","wai.up","wai.low")){
+  print(margin)
+  for (trait in c("leaf.area","nmass","lma","plant.height","ssd")){
+    print(trait)
+    margin.test |>
+      left_join(try.traits) |>
+      pivot_longer(cols=c("leaf.area","nmass","lma","plant.height","ssd"),
+                   names_to = "traits",
+                   values_to = "traits.val") |> 
+      pivot_longer(col=c("sgdd.up","sgdd.low","wai.up","wai.low"),
+               names_to = "margin.dist",
+               values_to = "margin.dist.val") |> 
+      filter(traits==trait & margin.dist==margin) -> df.lm
+    print(anova(lm(margin.dist.val~phylogenetic.group.general*traits.val,data=df.lm)))
+  }
+}
+```
+
+# Linear mixed model
+
+```{r}
+sp.dataset=rbind(fecundity.eu_clim |> mutate(zone="europe"),
+                 fecundity.am_clim|> mutate(zone="america")) |>
+  filter(BA!=0) |> #rm absences
+  group_by(species) |> 
+  mutate(cv_plot=if_else(is.na(cv_plot),mean(cv_plot,na.rm=TRUE),cv_plot)) |> # compute cv for missing values
+  mutate(margin.sgdd=case_when(sgdd<weighted.quantile(sgdd,w=1/cv_plot, prob=0.05)[[1]]~"cold",
+                               sgdd<weighted.quantile(sgdd,w=1/cv_plot, prob=0.525)[[1]]&
+                                 sgdd>weighted.quantile(sgdd,w=1/cv_plot, prob=0.475)[[1]]~"midtemp",
+                               sgdd>weighted.quantile(sgdd,w=1/cv_plot, prob=0.95)[[1]]~"hot"),
+         margin.wai=case_when(wai<weighted.quantile(wai,w=1/cv_plot, prob=0.05)[[1]]~"arid",
+                              wai<weighted.quantile(wai,w=1/cv_plot, prob=0.525)[[1]]&
+                                 wai>weighted.quantile(wai,w=1/cv_plot, prob=0.475)[[1]]~"midhum",
+                               wai>weighted.quantile(wai,w=1/cv_plot, prob=0.95)[[1]]~"humid"),
+         cor.wai.sgdd=cor(wai,sgdd,use="complete.obs")) |> 
+  pivot_longer(cols=c("margin.sgdd","margin.wai"),
+               names_to="margin.type",
+               values_to="margin.val") |> 
+  filter(!is.na(margin.val)) |> 
+  ungroup() |> 
+  mutate(margin.val=factor(margin.val,levels=c("midtemp","cold","hot","midhum","arid","humid")),
+         ISP=scale(ISP)) |> 
+  as.data.table() 
+
+# fit mixed model
+library(lme4)
+sp.mod=sp.dataset |> filter(margin.type=="margin.sgdd")
+mod.fec.margin=lm(ISP~species+ species:margin.val,data=sp.mod)
+summary=as.data.frame(summary(mod.fec.margin)$coefficients)
+summary |> 
+  tibble::rownames_to_column(var="species") |> 
+  filter(grepl(":",species)) |> 
+  separate(species,into=c("species","margin"),sep=":") |> 
+  mutate(species=str_sub(species,8,-1)) |> 
+  arrange(species) |> 
+  group_by(species) |>
+  select(species,margin,Estimate,`Std. Error`) |> 
+  rename(mean=Estimate,
+         sd=`Std. Error`) |> 
+  pivot_wider(names_from = margin,
+              values_from = c("mean","sd")) |> 
+  ggplot(aes(mean_margin.valcold,mean_margin.valhot,col=species))+
+  geom_point()+
+  geom_errorbarh(aes(xmin=mean_margin.valcold-sd_margin.valcold,
+                     xmax=mean_margin.valcold+sd_margin.valcold))+
+  geom_errorbar(aes(ymin=mean_margin.valhot-sd_margin.valhot,
+                     ymax=mean_margin.valhot+sd_margin.valhot))+
+  coord_equal()+
+  theme(legend.position = "none")
+
+sp.mod=sp.dataset |> filter(margin.type=="margin.wai")
+mod.fec.margin=lm(ISP~species+ species:margin.val,data=sp.mod)
+summary=as.data.frame(summary(mod.fec.margin)$coefficients)
+summary |> 
+  tibble::rownames_to_column(var="species") |> 
+  filter(grepl(":",species)) |> 
+  separate(species,into=c("species","margin"),sep=":") |> 
+  mutate(species=str_sub(species,8,-1)) |> 
+  arrange(species) |> 
+  group_by(species) |>
+  select(species,margin,Estimate,`Std. Error`) |> 
+  rename(mean=Estimate,
+         sd=`Std. Error`) |> 
+  pivot_wider(names_from = margin,
+              values_from = c("mean","sd")) |> 
+  ggplot(aes(mean_margin.valarid,mean_margin.valhumid,col=species))+
+  geom_point()+
+  geom_errorbarh(aes(xmin=mean_margin.valarid-sd_margin.valarid,
+                     xmax=mean_margin.valarid+sd_margin.valarid))+
+  geom_errorbar(aes(ymin=mean_margin.valhumid-sd_margin.valhumid,
+                     ymax=mean_margin.valhumid+sd_margin.valhumid))+
+  coord_equal()+
+  theme(legend.position = "none")
+```
+
+
+
+
 # Improvement :
 - weight by uncertainty
 - sensitivity to quantiles delineation
@@ -1288,6 +2225,7 @@ sensibility |>
     geom_line()+
     facet_wrap(~species)
 ```
+
 
 # Annexe 
 

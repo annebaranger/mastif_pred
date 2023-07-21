@@ -166,11 +166,12 @@ select_species <- function(mastif.am,
     relocate(var,.after=species_l) |> 
   # merge climate range
     left_join(df.range,by=c("species","var")) |> 
-    filter(!is.na(species_l)) |> 
+    # filter(!is.na(species_l)) |> 
     mutate(dif=case_when(grepl("opt",clim)~100*abs(clim_obs-clim_niche)/range,
                          grepl("high",clim)~100*(clim_obs-clim_niche)/range,
                          grepl("low",clim)~100*(clim_niche-clim_obs)/range)) |> 
-    filter(dif<(-50)) |> 
+    filter(dif<(-50)|is.na(dif)) |> # filter out large difference and also
+      # species for which there is no data in GBIF
     select(species) |> unique())$species->sp.deleted
   sp.select=setdiff(unique(df.tree$species),sp.deleted)
   sp.select.eu=sp.select[sp.select %in% mastif.eu$df.species.select$species]
