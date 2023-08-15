@@ -78,13 +78,33 @@ get_mastif <- function(dir.data="data/fecundityMastif.rdata",
 
 
 get_specieslist <- function(species.list,block){
+  # load a list of world species
   species.world=read.csv2("data/global_tree_search_trees_1_7.csv")[,1:2] |> 
     separate(TaxonName,into=c("genus","sp"),remove=FALSE) |> 
-    mutate(species=paste0(substr(tolower(genus),1,8),substr(str_to_title(sp),1,8))) 
+    mutate(species=paste0(substr(tolower(genus),1,8),substr(str_to_title(sp),1,8))) # recreate ID of mastif
+  # create correspondence between ID and full species name
   species.code=species.world |> 
     filter(species%in%species.list) |> 
     mutate(block=block)
-  return(species.code)
+  
+  # add phylogeny
+  classification(unique(species.code$TaxonName),db="ncbi")->out # get phylogeny from species names
+  class2tree(out,check=FALSE)->out2 # random command
+  
+  species.phylo <- out2$classification |> # extract phylogeny from taxize object
+    tibble::rownames_to_column( var = "species_init") |>
+    # reformat long species name
+    mutate(species_l=case_when(is.na(species)~species_init,
+                             TRUE~species)) |> 
+    # reformat taxa
+    mutate(taxa=case_when(class=="Pinopsida"~"gymnosperm",
+                          class=="Magnoliopsida"~"angiosperm")) |>
+    select(species_l,genus,family,order,taxa) |> # select relevant fields
+    left_join(species.code[,c("TaxonName","species","block")],by=c("species_l"="TaxonName")) |>
+    unique()
+  rm(out,out2)
+  
+  return(species.phylo)
 }
 
 

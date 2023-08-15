@@ -1,0 +1,326 @@
+---
+title: "02_fecundity-hyp"
+author: "Anne Baranger"
+date: "2023-07-29"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE,message=FALSE)
+library(targets)
+lapply(c("stringr","tidyr","dplyr","tibble","data.table", # data analysis
+         "ggplot2","viridis", # plot
+         "factoextra", "modi", "nlme",# specific computation #taxize
+         "rworldmap" # geographic data #terre, sf
+         ),require,character.only=TRUE)
+theme_set(theme_minimal()) # ggplot theme
+
+
+# load necessary data #
+
+## mastif data ##
+# tar_load(mastif.eu,store="target_data")
+# tar_load(mastif.am,store="target_data")
+
+## gbif data ##
+#tar_load(meanClimate_species,store="target_gbif")
+
+
+## results from selection ##
+# to be nuanced 
+tar_load(species_selection,store="target_nfi")
+
+## species selection ##
+tar_load(phylo.select,store="target_nfi")
+
+
+sp.select.eu=species_selection$sp.select.eu
+sp.select.am=species_selection$sp.select.am
+
+
+
+# small format of gbif
+df.gbif.short <- species_selection$df.gbif |>
+  separate(clim,into = c("clim","range")) |> 
+  pivot_wider(names_from = range,
+                values_from = clim_niche)
+
+#compute climate range
+df.range<-species_selection$df.gbif |> 
+    select(species,clim,clim_niche) |> 
+    filter(grepl("range",clim)) |> 
+    separate(clim,into=c("var","drop")) |> 
+    select(-drop) |> 
+    rename(range="clim_niche")
+
+## fecundity data ##
+tar_load(fecundity.eu_clim,store="target_nfi")
+tar_load(fecundity.am_clim,store="target_nfi")
+```
+
+# Data description
+mastif.am/eu
+- df.alltree : raw obs of mastif, not filtered, but reformated and with climate extraction
+- df.allplot : plot IDs from df.alltree
+- df.species.select : filtering of species based on a minimum of observations
+- df.tree: raw obs only for selected species
+
+species_selection 
+ - df.gbif - niche by species, reformated for use with mastif
+ - df.tree_w all tree (in df.tree) with computed weight
+ - mastif.range - niche according to mastif plots with the use of weight
+ - sp.select.am
+ - sp.select.eu
+
+df.nfi.eu/am -  plot of nfi, with size, climate
+
+nfi.eu/am_clim
+ - acp of climate variables
+ - plots of nfi + etc + predictions of pca first axis
+
+fec.eu/am
+ - for each nfi plot, ba/ISP/fecmu/sd and weight of each plot -> scaled to the hectare, long format. all species represented on each plots even if absent
+
+sp.margin.eu/am
+ - for each species of the nfi, compute the quantile of pca first axis
+
+fecundity.eu_clim
+ - fecundity coupled with climate of plots, and condition of margin
+
+-> fecundity datasets are long formats of nfi plots crossed by species list. It includes non-occurence of species.
+
+# Check repartition of species climate in their continent
+
+```{r nfi_check}
+fecundity.eu_clim |> 
+  group_by(plot) |> 
+  mutate(occ=(sum(BA>0)!=0)) |> 
+  select(plot,occ,PC1,PC2) |> unique() |> 
+  ungroup() |> 
+  # sample_n(50000) |> 
+  ggplot(aes(PC1,PC2,color=occ))+
+  geom_point()+
+  facet_wrap(~occ)
+
+fecundity.am_clim |> 
+  group_by(plot) |> 
+  mutate(occ=(sum(BA>0)!=0)) |> 
+  select(plot,occ,PC1,PC2) |> unique() |> 
+  ungroup() |> 
+  # sample_n(50000) |> 
+  ggplot(aes(PC1,PC2,color=occ))+
+  geom_point()+
+  facet_wrap(~occ)
+```
+
+
+# H1 : fecundity varies in species margins
+
+
+I bind fecundity dataset, filter absences, and compute weigthed quantiles of climatic data and correlation between both variables.
+
+Hypothesis : ISP is higher in humid and in hot margin of species, independently of species.
+-> observed effect in lmer with random effect on species. 
+-> ISP scale by species, for being able to compare interaction effects. interactions reflect the same pattern.
+
+Hypothesis : there is a different pattern between continent because of difference in climatic space
+-> correlation between sgdd/wai is higher in species distribution of america
+-> 
+## format data
+Few plots for investigating differences in correlation between climatic variables.
+
+```{r data_lmer}
+sp.dataset=rbind(fecundity.eu_clim |> mutate(block="europe"),
+                 fecundity.am_clim|> mutate(block="america")) |>
+  filter(BA!=0) |> #rm absences
+  # filter(ISP<quantile(ISP,probs=0.97)) |>  # remove extreme values
+  group_by(species) |> 
+  mutate(cv_plot=if_else(is.na(cv_plot),mean(cv_plot,na.rm=TRUE),cv_plot)) |> # compute cv for missing values
+  # compute weighted quantiles of sgdd and wai, and correlation between wai and sgdd
+  mutate(margin.sgdd=case_when(sgdd<weighted.quantile(sgdd,w=1/cv_plot, prob=0.05)[[1]]~"cold",
+                               sgdd<weighted.quantile(sgdd,w=1/cv_plot, prob=0.525)[[1]]&
+                                 sgdd>weighted.quantile(sgdd,w=1/cv_plot, prob=0.475)[[1]]~"midtemp",
+                               sgdd>weighted.quantile(sgdd,w=1/cv_plot, prob=0.95)[[1]]~"hot"),
+         margin.wai=case_when(wai<weighted.quantile(wai,w=1/cv_plot, prob=0.05)[[1]]~"arid",
+                              wai<weighted.quantile(wai,w=1/cv_plot, prob=0.525)[[1]]&
+                                 wai>weighted.quantile(wai,w=1/cv_plot, prob=0.475)[[1]]~"midhum",
+                               wai>weighted.quantile(wai,w=1/cv_plot, prob=0.95)[[1]]~"humid"),
+         cor.wai.sgdd=cor(wai,sgdd,use="complete.obs")) |> 
+  pivot_longer(cols=c("margin.sgdd","margin.wai"),
+               names_to="margin.type",
+               values_to="margin.val") |> 
+  filter(!is.na(margin.val)) |> # position importante pour le scaling!!
+  mutate(margin.val=factor(margin.val,levels=c("midtemp","cold","hot","midhum","arid","humid")),
+         ISP=(ISP-weighted.mean(ISP,w=1/cv_plot))/sqrt(weighted.var(ISP,w=1/cv_plot))) |>
+  ungroup() |> 
+  as.data.table()
+
+sp.dataset |> 
+  ggplot()+
+  geom_density(aes(ISP,color=species))+
+  theme(legend.position = "none")+
+  scale_x_log10()
+```
+
+
+Weight lacking in computation
+```{r cor.dif}
+# investigating ddiference in wai/sgdd correlation between continents
+
+sp.ttest<-sp.dataset |> 
+  select(species,cor.wai.sgdd,block) |> 
+  unique()
+
+sp.ttest |> 
+  ggplot(aes(cor.wai.sgdd,color=block))+
+  geom_density()
+
+t.test(sp.ttest[sp.ttest$block=="america","cor.wai.sgdd"],
+       sp.ttest[sp.ttest$block=="europe","cor.wai.sgdd"])
+
+
+rm(sp.ttest)
+```
+
+
+```{r margin.dif}
+# investigating difference in ISP distrib in margin between continent
+
+sp.dataset |> 
+  ggplot(aes(margin.val,ISP,color=block))+
+  geom_boxplot()+
+  facet_wrap(~margin.type,scales="free_x")+
+  scale_y_log10()
+```
+
+## Linear mixed models
+
+1 model for each margin type.
+-> useful to create a join model? 
+
+### sgdd 
+
+```{r lmer}
+# for SGDD #
+sp.mod=sp.dataset |> filter(margin.type=="margin.sgdd")
+
+mod.lme=lme(ISP~margin.val+margin.val:block,random=~1|species,weights=varFixed(~cv_plot),data=sp.mod)
+summary(mod.lme)
+anova(mod.lme)
+
+
+# for WAI #
+sp.mod=sp.dataset |> filter(margin.type=="margin.wai")
+
+mod.lme=lme(ISP~margin.val+margin.val:block,random=~1|species,weights=varFixed(~cv_plot),data=sp.mod)
+summary(mod.lme)
+anova(mod.lme)
+
+rm(mod.lme)
+```
+
+
+```{r lmer}
+# effect per species
+sp.mod=sp.dataset |> filter(margin.type=="margin.sgdd")
+mod.fec.margin=lm(ISP~species + species:margin.val,data=sp.mod)
+summary=as.data.frame(summary(mod.fec.margin)$coefficients)
+
+summary |> 
+  # format model output
+  tibble::rownames_to_column(var="species") |> 
+  filter(grepl(":",species)) |> # select only interaction coeff
+  separate(species,into=c("species","margin"),sep=":") |> 
+  mutate(species=str_sub(species,8,-1)) |> 
+  arrange(species) |> 
+  group_by(species) |>
+  select(species,margin,Estimate,`Std. Error`) |> 
+  rename(mean=Estimate,
+         sd=`Std. Error`) |> 
+  pivot_wider(names_from = margin,
+              values_from = c("mean","sd")) |> 
+  left_join(sp.dataset |> select(species,block) |> unique()) |>
+  ggplot(aes(mean_margin.valcold,mean_margin.valhot,col=block))+
+  geom_point()+
+  geom_errorbarh(aes(xmin=mean_margin.valcold-sd_margin.valcold,
+                     xmax=mean_margin.valcold+sd_margin.valcold))+
+  geom_errorbar(aes(ymin=mean_margin.valhot-sd_margin.valhot,
+                     ymax=mean_margin.valhot+sd_margin.valhot))+
+  coord_equal()+
+  theme(legend.position = "none")
+summary |> 
+  tibble::rownames_to_column(var="species") |> 
+  filter(grepl(":",species)) |> 
+  separate(species,into=c("species","margin"),sep=":") |> 
+  mutate(species=str_sub(species,8,-1)) |> 
+  arrange(species) |> 
+  group_by(species) |>
+  select(species,margin,Estimate,`Std. Error`) |> 
+  rename(mean=Estimate,
+         sd=`Std. Error`) |> 
+  ungroup() |> 
+  left_join(sp.dataset |> select(species,block) |> unique()) |>
+  mutate(weight=abs(mean/sd)) |> 
+  ggplot()+
+  # geom_point(aes(margin,mean,color=block))
+  geom_boxplot(aes(margin,mean,weight=weight,color=block))
+
+ 
+rm(sp.mod,mod.fec.margin,summary)
+```
+
+### WAI
+
+
+```{r lmer}
+# effect per species
+sp.mod=sp.dataset |> filter(margin.type=="margin.wai")
+mod.fec.margin=lm(ISP~species + species:margin.val,weights=1/cv_plot,data=sp.mod)
+summary=as.data.frame(summary(mod.fec.margin)$coefficients)
+
+summary |> 
+  # format model output
+  tibble::rownames_to_column(var="species") |> 
+  filter(grepl(":",species)) |> # select only interaction coeff
+  separate(species,into=c("species","margin"),sep=":") |> 
+  mutate(species=str_sub(species,8,-1)) |> 
+  arrange(species) |> 
+  group_by(species) |>
+  select(species,margin,Estimate,`Std. Error`) |> 
+  rename(mean=Estimate,
+         sd=`Std. Error`) |> 
+  pivot_wider(names_from = margin,
+              values_from = c("mean","sd")) |> 
+  left_join(sp.dataset |> select(species,block) |> unique()) |>
+  ggplot(aes(mean_margin.valarid,mean_margin.valhumid,col=block))+
+  geom_point()+
+  geom_errorbarh(aes(xmin=mean_margin.valarid-sd_margin.valarid,
+                     xmax=mean_margin.valarid+sd_margin.valarid))+
+  geom_errorbar(aes(ymin=mean_margin.valhumid-sd_margin.valhumid,
+                     ymax=mean_margin.valhumid+sd_margin.valhumid))+
+  coord_equal()+
+  theme(legend.position = "none")
+summary |> 
+  tibble::rownames_to_column(var="species") |> 
+  filter(grepl(":",species)) |> 
+  separate(species,into=c("species","margin"),sep=":") |> 
+  mutate(species=str_sub(species,8,-1)) |> 
+  arrange(species) |> 
+  group_by(species) |>
+  select(species,margin,Estimate,`Std. Error`) |> 
+  rename(mean=Estimate,
+         sd=`Std. Error`) |> 
+  ungroup() |> 
+  left_join(sp.dataset |> select(species,block) |> unique()) |>
+  mutate(weight=abs(mean/sd)) |> 
+  ggplot()+
+  geom_boxplot(aes(margin,mean,weight=weight,color=block))
+
+ 
+rm(sp.mod,mod.fec.margin,summary)
+```
+### Question pour GK
+- scaling des variables : scaling par espèce et ensuite filtre avec que les marges -> permet de vraiment capter les différences. Ordre change beaucoup le résultat!!
+- quand faut-il prendre en compte le poids? scaling des variables? fit du modèle? Les deux c'est un peu trop non?
+- comment prendre en compte la corrélation? a part montrer qu'elle est distribuée différement entre continent, difficile de montrer qu'elle est liée directement aux paramètres des marges.
+- est ce que regarder que les intéractions c'est ok? prise en compte notamment de l'intercept par espèce. Mais si c'est les ISP sont scale normalement leur moyenne est a zero. faut-il les scale avant filtrer ...

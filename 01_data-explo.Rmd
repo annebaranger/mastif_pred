@@ -63,6 +63,12 @@ tar_load(fecundity.am_clim,store="target_nfi")
 ```
 
 # Data description
+mastif.am/eu
+- df.alltree : raw obs of mastif, not filtered, but reformated and with climate extraction
+- df.allplot : plot IDs from df.alltree
+- df.species.select : filtering of species based on a minimum of observations
+- df.tree: raw obs only for selected species
+
 species_selection 
  - df.gbif - niche by species, reformated for use with mastif
  - df.tree_w all tree (in df.tree) with computed weight
@@ -871,7 +877,7 @@ fecundity.eu_clim |>
 ## delineate using distance to core population
 
 
-```{r geomargin}
+```{r geomargin, eval=FALSE, include=FALSE}
 sp.dataset=as.data.table(fecundity.eu_clim |> filter(BA!=0))
 sp.dataset<-sp.dataset[species==sp,]
 sp.dataset |> 
@@ -1064,9 +1070,9 @@ fecdist.lm=lm(ISP~species+dist+lat+dist:species,data=sp.dist)
 summary(fecdist.lm)
 anova(fecdist.lm)
 
-
-fecdist.rq <- rq(ISP~species+dist+lat+dist:species,data=sp.dist, tau = 0.95)
-summary(fecdist.rq)
+# quantile regression
+# fecdist.rq <- rq(ISP~species+dist+lat+dist:species,data=sp.dist, tau = 0.95)
+# summary(fecdist.rq)
 ```
 
 # Fecundity variability in negative safety margins
@@ -1441,7 +1447,7 @@ for(sp in dist.test$species){
 #   ggplot(aes(margin,dist_maha))+geom_boxplot()
 # fec.sp |> 
 #   ggplot(aes(lat,log(BA)))+geom_point()+geom_smooth(method="lm")
-
+rm(sp.elp,fec.sp,points_sp,centroid_sp)
 ```
 
 
@@ -1734,7 +1740,12 @@ margin.test |>
   geom_segment(aes(x=0,y=0,xend=sgdd.low,yend=sgdd.up),arrow = arrow(length = unit(0.3,"cm")))+
   geom_text(aes(label=species, x=sgdd.low,y=sgdd.up))+
   coord_equal()
-
+margin.test |>
+  mutate(across(c("sgdd.up","sgdd.low"),
+                ~if_else(is.na(.x),0,.x))) |> 
+  ggplot(aes(color=zone))+
+  geom_point(aes(x=sgdd.low,y=sgdd.up),position=position_jitter(width = 0.1, height = 0.1))+
+  coord_equal()
 
 # color by climate, sgdd
 margin.test |>
@@ -2069,9 +2080,17 @@ sp.dataset=rbind(fecundity.eu_clim |> mutate(zone="europe"),
          ISP=scale(ISP)) |> 
   as.data.table() 
 
-# fit mixed model
+# fit linear model
 library(lme4)
 sp.mod=sp.dataset |> filter(margin.type=="margin.sgdd")
+# general effect of margin
+mod.lmer=lmer(ISP~zone*margin.val+(1|species),data=sp.mod)
+summary(mod.lmer)
+
+library(nlme)
+mod.lme=lme(ISP~zone*margin.val,random=~1|species,data=sp.mod)
+
+# effect per species
 mod.fec.margin=lm(ISP~species+ species:margin.val,data=sp.mod)
 summary=as.data.frame(summary(mod.fec.margin)$coefficients)
 summary |> 
@@ -2086,7 +2105,8 @@ summary |>
          sd=`Std. Error`) |> 
   pivot_wider(names_from = margin,
               values_from = c("mean","sd")) |> 
-  ggplot(aes(mean_margin.valcold,mean_margin.valhot,col=species))+
+  left_join(sp.dataset |> select(species,zone) |> unique()) |>
+  ggplot(aes(mean_margin.valcold,mean_margin.valhot,col=zone))+
   geom_point()+
   geom_errorbarh(aes(xmin=mean_margin.valcold-sd_margin.valcold,
                      xmax=mean_margin.valcold+sd_margin.valcold))+
@@ -2094,8 +2114,28 @@ summary |>
                      ymax=mean_margin.valhot+sd_margin.valhot))+
   coord_equal()+
   theme(legend.position = "none")
+summary |> 
+  tibble::rownames_to_column(var="species") |> 
+  filter(grepl(":",species)) |> 
+  separate(species,into=c("species","margin"),sep=":") |> 
+  mutate(species=str_sub(species,8,-1)) |> 
+  arrange(species) |> 
+  group_by(species) |>
+  select(species,margin,Estimate,`Std. Error`) |> 
+  rename(mean=Estimate,
+         sd=`Std. Error`) |> 
+  ungroup() |> 
+  left_join(sp.dataset |> select(species,zone) |> unique()) |>
+  mutate(weight=abs(mean/sd)) |> 
+  ggplot()+
+  geom_boxplot(aes(margin,mean,weight=weight,color=zone))
+  
+
+
 
 sp.mod=sp.dataset |> filter(margin.type=="margin.wai")
+mod.lmer=lmer(ISP~margin.val+(1|species),data=sp.mod)
+summary(mod.lmer)
 mod.fec.margin=lm(ISP~species+ species:margin.val,data=sp.mod)
 summary=as.data.frame(summary(mod.fec.margin)$coefficients)
 summary |> 
@@ -2110,7 +2150,8 @@ summary |>
          sd=`Std. Error`) |> 
   pivot_wider(names_from = margin,
               values_from = c("mean","sd")) |> 
-  ggplot(aes(mean_margin.valarid,mean_margin.valhumid,col=species))+
+  left_join(sp.dataset |> select(species,zone) |> unique()) |>
+  ggplot(aes(mean_margin.valarid,mean_margin.valhumid,col=zone))+
   geom_point()+
   geom_errorbarh(aes(xmin=mean_margin.valarid-sd_margin.valarid,
                      xmax=mean_margin.valarid+sd_margin.valarid))+
@@ -2118,6 +2159,24 @@ summary |>
                      ymax=mean_margin.valhumid+sd_margin.valhumid))+
   coord_equal()+
   theme(legend.position = "none")
+summary |> 
+  tibble::rownames_to_column(var="species") |> 
+  filter(grepl(":",species)) |> 
+  separate(species,into=c("species","margin"),sep=":") |> 
+  mutate(species=str_sub(species,8,-1)) |> 
+  arrange(species) |> 
+  group_by(species) |>
+  select(species,margin,Estimate,`Std. Error`) |> 
+  rename(mean=Estimate,
+         sd=`Std. Error`) |> 
+  ungroup() |> 
+  left_join(sp.dataset |> select(species,zone) |> unique()) |>
+  mutate(weight=abs(mean/sd)) |> 
+  ggplot()+
+  geom_boxplot(aes(margin,mean,weight=weight,color=zone))
+
+summary(mod.lme)
+summary(mod.lmer)
 ```
 
 

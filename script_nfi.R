@@ -17,7 +17,7 @@ meanClimate_species=tar_read(meanClimate_species,store="target_gbif")
 
 #Targets
 list(
-  # species selection
+  # species selection #
   tar_target(
     species_selection,
     select_species(mastif.am,
@@ -26,11 +26,26 @@ list(
   ),
   tar_target(
     sp.select.am,
-    species_selection$sp.select.am
+    species_selection$sp.select.am # extract only selection from am
   ),
   tar_target(
     sp.select.eu,
     species_selection$sp.select.eu
+  ),
+  ## create a dataframe with species selection and phylogeny
+  tar_target(
+    species.phylo.file,
+    "target_data/objects/species.phylo",
+    format="file"
+  ),
+  tar_target(
+    species.phylo,
+    readRDS(species.phylo.file)
+  ),
+  tar_target(
+    phylo.select,
+    species.phylo |> 
+      filter(species %in% c(sp.select.am,sp.select.eu))
   ),
   
   # nfi data

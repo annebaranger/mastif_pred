@@ -9,3 +9,4 @@ SpeciesMeanClimate_GBIF-main/
 target_*
 *.png
 *.RData
+*.html

@@ -8,7 +8,7 @@ library(targets)
 #Options
 source("R/functions_data.R")
 options(tidyverse.quiet = TRUE)
-tar_option_set(packages = c("stringr","ggplot2","tidyr","dplyr","terra","factoextra"),
+tar_option_set(packages = c("stringr","ggplot2","tidyr","dplyr","terra","factoextra","taxize"),
                error = "continue") 
 
 #Targets
@@ -30,6 +30,10 @@ list(
     species.am,
     get_specieslist(mastif.am$df.species.select$species,
                     block="america")
+  ),
+  tar_target(
+    species.phylo,
+    rbind(species.am,species.eu)
   ),
   NULL
 )
