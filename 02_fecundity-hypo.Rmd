@@ -129,6 +129,15 @@ Hypothesis : there is a different pattern between continent because of differenc
 ## format data
 Few plots for investigating differences in correlation between climatic variables.
 
+
+
+## All species together
+
+### Format 
+
+Analysis are performed on ISP (but maybe try on absolute fec). When all species together, ISP is scaled only over observations in margins (and center).
+Because of extreme values, species ISP distributions are very different.
+
 ```{r data_lmer}
 sp.dataset=rbind(fecundity.eu_clim |> mutate(block="europe"),
                  fecundity.am_clim|> mutate(block="america")) |>
@@ -137,33 +146,38 @@ sp.dataset=rbind(fecundity.eu_clim |> mutate(block="europe"),
   group_by(species) |> 
   mutate(cv_plot=if_else(is.na(cv_plot),mean(cv_plot,na.rm=TRUE),cv_plot)) |> # compute cv for missing values
   # compute weighted quantiles of sgdd and wai, and correlation between wai and sgdd
-  mutate(margin.sgdd=case_when(sgdd<weighted.quantile(sgdd,w=1/cv_plot, prob=0.05)[[1]]~"cold",
-                               sgdd<weighted.quantile(sgdd,w=1/cv_plot, prob=0.525)[[1]]&
-                                 sgdd>weighted.quantile(sgdd,w=1/cv_plot, prob=0.475)[[1]]~"midtemp",
-                               sgdd>weighted.quantile(sgdd,w=1/cv_plot, prob=0.95)[[1]]~"hot"),
-         margin.wai=case_when(wai<weighted.quantile(wai,w=1/cv_plot, prob=0.05)[[1]]~"arid",
-                              wai<weighted.quantile(wai,w=1/cv_plot, prob=0.525)[[1]]&
-                                 wai>weighted.quantile(wai,w=1/cv_plot, prob=0.475)[[1]]~"midhum",
-                               wai>weighted.quantile(wai,w=1/cv_plot, prob=0.95)[[1]]~"humid"),
+  mutate(margin.sgdd=case_when(sgdd<weighted.quantile(sgdd,w=BA, prob=0.05)[[1]]~"cold",
+                               sgdd<weighted.quantile(sgdd,w=BA, prob=0.525)[[1]]&
+                                 sgdd>weighted.quantile(sgdd,w=BA, prob=0.475)[[1]]~"midtemp",
+                               sgdd>weighted.quantile(sgdd,w=BA, prob=0.95)[[1]]~"hot"),
+         margin.wai=case_when(wai<weighted.quantile(wai,w=BA, prob=0.05)[[1]]~"arid",
+                              wai<weighted.quantile(wai,w=BA, prob=0.525)[[1]]&
+                                 wai>weighted.quantile(wai,w=BA, prob=0.475)[[1]]~"midhum",
+                               wai>weighted.quantile(wai,w=BA, prob=0.95)[[1]]~"humid"),
          cor.wai.sgdd=cor(wai,sgdd,use="complete.obs")) |> 
   pivot_longer(cols=c("margin.sgdd","margin.wai"),
                names_to="margin.type",
                values_to="margin.val") |> 
   filter(!is.na(margin.val)) |> # position importante pour le scaling!!
   mutate(margin.val=factor(margin.val,levels=c("midtemp","cold","hot","midhum","arid","humid")),
-         ISP=(ISP-weighted.mean(ISP,w=1/cv_plot))/sqrt(weighted.var(ISP,w=1/cv_plot))) |>
+         block=factor(block,levels=c("america","europe"))) |> 
+         # ISP=(ISP-weighted.mean(ISP,w=1/cv_plot))/sqrt(weighted.var(ISP,w=1/cv_plot))) |>
   ungroup() |> 
+  mutate(ISP=log(ISP)) |> 
   as.data.table()
 
 sp.dataset |> 
   ggplot()+
   geom_density(aes(ISP,color=species))+
-  theme(legend.position = "none")+
-  scale_x_log10()
+  theme(legend.position = "none")
+  # scale_x_log10()
+
 ```
 
+### Comparison of correlation wai/sgdd between continent
+Weight lacking in computation, but should only be weighted by BA and not cv_plot!!
+Sgdd/wai are analysed with correlation with all observation and with observation only in margins.
 
-Weight lacking in computation
 ```{r cor.dif}
 # investigating ddiference in wai/sgdd correlation between continents
 
@@ -171,10 +185,19 @@ sp.ttest<-sp.dataset |>
   select(species,cor.wai.sgdd,block) |> 
   unique()
 
+# correlation computed on whole dataset
 sp.ttest |> 
   ggplot(aes(cor.wai.sgdd,color=block))+
   geom_density()
 
+# correlation computed only on margins obs
+sp.dataset |> 
+  group_by(species) |> 
+  mutate(cor.wai.sgdd=cor(wai,sgdd,use="complete.obs")) |> 
+  select(species,cor.wai.sgdd,block) |> 
+  unique()|> 
+  ggplot(aes(cor.wai.sgdd,color=block))+
+  geom_density()
 t.test(sp.ttest[sp.ttest$block=="america","cor.wai.sgdd"],
        sp.ttest[sp.ttest$block=="europe","cor.wai.sgdd"])
 
@@ -183,22 +206,43 @@ rm(sp.ttest)
 ```
 
 
-```{r margin.dif}
-# investigating difference in ISP distrib in margin between continent
+### Preliminary analysis
+Differences but hard to analyse.
 
-sp.dataset |> 
-  ggplot(aes(margin.val,ISP,color=block))+
-  geom_boxplot()+
-  facet_wrap(~margin.type,scales="free_x")+
-  scale_y_log10()
+```{r margin.dif}
+rbind(fecundity.eu_clim |> mutate(block="europe"),
+                 fecundity.am_clim|> mutate(block="america")) |>
+  filter(BA!=0) |> #rm absences
+  # filter(ISP<quantile(ISP,probs=0.97)) |>  # remove extreme values
+  group_by(species) |> 
+  mutate(cv_plot=if_else(is.na(cv_plot),mean(cv_plot,na.rm=TRUE),cv_plot)) |> # compute cv for missing values
+  # compute weighted quantiles of sgdd and wai, and correlation between wai and sgdd
+  mutate(margin.sgdd=case_when(sgdd<weighted.quantile(sgdd,w=BA, prob=0.05)[[1]]~"cold",
+                               sgdd<weighted.quantile(sgdd,w=BA, prob=0.575)[[1]]&
+                                 sgdd>weighted.quantile(sgdd,w=BA, prob=0.475)[[1]]~"midtemp",
+                               sgdd>weighted.quantile(sgdd,w=BA, prob=0.95)[[1]]~"hot"),
+         margin.wai=case_when(wai<weighted.quantile(wai,w=BA, prob=0.05)[[1]]~"arid",
+                              wai<weighted.quantile(wai,w=BA, prob=0.575)[[1]]&
+                                 wai>weighted.quantile(wai,w=BA, prob=0.475)[[1]]~"midhum",
+                               wai>weighted.quantile(wai,w=BA, prob=0.95)[[1]]~"humid"),
+         cor.wai.sgdd=cor(wai,sgdd,use="complete.obs")) |> 
+  pivot_longer(cols=c("margin.sgdd","margin.wai"),
+               names_to="margin.type",
+               values_to="margin.val") |> 
+  filter(!is.na(margin.val)) |> # position importante pour le scaling!!
+  ungroup() |> 
+  mutate(margin.val=factor(margin.val,levels=c("cold","midtemp","hot","arid","midhum","humid")),
+         ISP=scale(log(ISP))) |>  
+  ggplot()+
+  geom_boxplot(aes(margin.val,ISP,color=block,weight=1/cv_plot))+
+  facet_wrap(~margin.type,scales="free_x")
 ```
 
-## Linear mixed models
+
+### LMM per margins, with continent effect
 
 1 model for each margin type.
--> useful to create a join model? 
 
-### sgdd 
 
 ```{r lmer}
 # for SGDD #
@@ -207,7 +251,9 @@ sp.mod=sp.dataset |> filter(margin.type=="margin.sgdd")
 mod.lme=lme(ISP~margin.val+margin.val:block,random=~1|species,weights=varFixed(~cv_plot),data=sp.mod)
 summary(mod.lme)
 anova(mod.lme)
-
+sp.mod |> 
+  ggplot(aes(margin.val,ISP))+
+  geom_boxplot(aes(weight=1/cv_plot,color=block))
 
 # for WAI #
 sp.mod=sp.dataset |> filter(margin.type=="margin.wai")
@@ -215,12 +261,69 @@ sp.mod=sp.dataset |> filter(margin.type=="margin.wai")
 mod.lme=lme(ISP~margin.val+margin.val:block,random=~1|species,weights=varFixed(~cv_plot),data=sp.mod)
 summary(mod.lme)
 anova(mod.lme)
+sp.mod |> 
+  ggplot(aes(margin.val,ISP))+
+  geom_boxplot(aes(weight=1/cv_plot,color=block))
 
-rm(mod.lme)
+rm(mod.lme,sp.mod)
 ```
 
+### LMM with interactions between margins
 
 ```{r lmer}
+# with interaction
+sp.mod=sp.dataset |>
+  pivot_wider(names_from = "margin.type",
+              values_from = "margin.val") |> 
+  # mutate(across(matches("margin"),~replace_na(as.character(.x),"inter"))) |> 
+  mutate(margin.sgdd=case_when(is.na(margin.sgdd)~"midtemp",
+                               TRUE~as.character(margin.sgdd)),
+         margin.wai=case_when(is.na(margin.wai)~"midhum",
+                               TRUE~as.character(margin.wai))) |> 
+  mutate(margin.sgdd=factor(margin.sgdd,levels=c("midtemp","cold","hot")),
+         margin.wai=factor(margin.wai,levels=c("midhum","arid","humid"))) 
+mod.lme = lme(ISP ~ margin.sgdd * margin.wai , 
+              random = ~ 1 | species, 
+             weights = varFixed(~cv_plot), 
+             data = sp.mod)
+summary(mod.lme)
+anova(mod.lme)
+
+
+species.sample= sample(unique(sp.dataset$species),8)
+rbind(fecundity.eu_clim |> mutate(block="europe"),
+                 fecundity.am_clim|> mutate(block="america")) |>
+  filter(BA!=0) |> #rm absences
+  # filter(ISP<quantile(ISP,probs=0.97)) |>  # remove extreme values
+  group_by(species) |> 
+  mutate(cv_plot=if_else(is.na(cv_plot),mean(cv_plot,na.rm=TRUE),cv_plot)) |> # compute cv for missing values
+  # compute weighted quantiles of sgdd and wai, and correlation between wai and sgdd
+  mutate(margin.sgdd=case_when(sgdd<weighted.quantile(sgdd,w=BA, prob=0.05)[[1]]~"cold",
+                               sgdd<weighted.quantile(sgdd,w=BA, prob=0.525)[[1]]&
+                                 sgdd>weighted.quantile(sgdd,w=BA, prob=0.475)[[1]]~"midtemp",
+                               sgdd>weighted.quantile(sgdd,w=BA, prob=0.95)[[1]]~"hot"),
+         margin.wai=case_when(wai<weighted.quantile(wai,w=BA, prob=0.05)[[1]]~"arid",
+                              wai<weighted.quantile(wai,w=BA, prob=0.525)[[1]]&
+                                 wai>weighted.quantile(wai,w=BA, prob=0.475)[[1]]~"midhum",
+                               wai>weighted.quantile(wai,w=BA, prob=0.95)[[1]]~"humid"),
+         cor.wai.sgdd=cor(wai,sgdd,use="complete.obs")) |> 
+  pivot_longer(cols=c("margin.sgdd","margin.wai"),
+               names_to="margin.type",
+               values_to="margin.val") |> 
+  filter(!is.na(margin.val)) |> # position importante pour le scaling!!
+  mutate(margin.val=factor(margin.val,levels=c("midtemp","cold","hot","midhum","arid","humid"))) |> 
+         # ISP=(ISP-weighted.mean(ISP,w=1/cv_plot))/sqrt(weighted.var(ISP,w=1/cv_plot))) |>
+  ungroup() |>
+  filter(species %in% species.sample) |> 
+  ggplot(aes(margin.val,ISP,weight=1/cv_plot,color=species))+
+  geom_boxplot()+
+  facet_wrap(species~margin.type,scales="free")+
+  scale_y_log10()
+```
+### Old methods 
+
+This model does not account for weight. Also issues about scaling of variables
+```{r lmer, eval=FALSE, include=FALSE}
 # effect per species
 sp.mod=sp.dataset |> filter(margin.type=="margin.sgdd")
 mod.fec.margin=lm(ISP~species + species:margin.val,data=sp.mod)
@@ -269,58 +372,377 @@ summary |>
 rm(sp.mod,mod.fec.margin,summary)
 ```
 
-### WAI
 
-
-```{r lmer}
-# effect per species
-sp.mod=sp.dataset |> filter(margin.type=="margin.wai")
-mod.fec.margin=lm(ISP~species + species:margin.val,weights=1/cv_plot,data=sp.mod)
-summary=as.data.frame(summary(mod.fec.margin)$coefficients)
-
-summary |> 
-  # format model output
-  tibble::rownames_to_column(var="species") |> 
-  filter(grepl(":",species)) |> # select only interaction coeff
-  separate(species,into=c("species","margin"),sep=":") |> 
-  mutate(species=str_sub(species,8,-1)) |> 
-  arrange(species) |> 
-  group_by(species) |>
-  select(species,margin,Estimate,`Std. Error`) |> 
-  rename(mean=Estimate,
-         sd=`Std. Error`) |> 
-  pivot_wider(names_from = margin,
-              values_from = c("mean","sd")) |> 
-  left_join(sp.dataset |> select(species,block) |> unique()) |>
-  ggplot(aes(mean_margin.valarid,mean_margin.valhumid,col=block))+
-  geom_point()+
-  geom_errorbarh(aes(xmin=mean_margin.valarid-sd_margin.valarid,
-                     xmax=mean_margin.valarid+sd_margin.valarid))+
-  geom_errorbar(aes(ymin=mean_margin.valhumid-sd_margin.valhumid,
-                     ymax=mean_margin.valhumid+sd_margin.valhumid))+
-  coord_equal()+
-  theme(legend.position = "none")
-summary |> 
-  tibble::rownames_to_column(var="species") |> 
-  filter(grepl(":",species)) |> 
-  separate(species,into=c("species","margin"),sep=":") |> 
-  mutate(species=str_sub(species,8,-1)) |> 
-  arrange(species) |> 
-  group_by(species) |>
-  select(species,margin,Estimate,`Std. Error`) |> 
-  rename(mean=Estimate,
-         sd=`Std. Error`) |> 
-  ungroup() |> 
-  left_join(sp.dataset |> select(species,block) |> unique()) |>
-  mutate(weight=abs(mean/sd)) |> 
-  ggplot()+
-  geom_boxplot(aes(margin,mean,weight=weight,color=block))
-
- 
-rm(sp.mod,mod.fec.margin,summary)
-```
 ### Question pour GK
 - scaling des variables : scaling par espèce et ensuite filtre avec que les marges -> permet de vraiment capter les différences. Ordre change beaucoup le résultat!!
 - quand faut-il prendre en compte le poids? scaling des variables? fit du modèle? Les deux c'est un peu trop non?
 - comment prendre en compte la corrélation? a part montrer qu'elle est distribuée différement entre continent, difficile de montrer qu'elle est liée directement aux paramètres des marges.
 - est ce que regarder que les intéractions c'est ok? prise en compte notamment de l'intercept par espèce. Mais si c'est les ISP sont scale normalement leur moyenne est a zero. faut-il les scale avant filtrer ...
+
+
+## Per species
+
+```{r}
+sp.dataset.lm=rbind(fecundity.eu_clim |> mutate(block="europe"),
+                 fecundity.am_clim|> mutate(block="america")) |>
+  filter(BA!=0) |> #rm absences
+  # filter(ISP<quantile(ISP,probs=0.97)) |>  # remove extreme values
+  group_by(species) |> 
+  mutate(cv_plot=if_else(is.na(cv_plot),mean(cv_plot,na.rm=TRUE),cv_plot)) |> # compute cv for missing values
+  # compute weighted quantiles of sgdd and wai, and correlation between wai and sgdd
+  mutate(margin.sgdd=case_when(sgdd<weighted.quantile(sgdd,w=BA, prob=0.05)[[1]]~"cold",
+                               sgdd<weighted.quantile(sgdd,w=BA, prob=0.525)[[1]]&
+                                 sgdd>weighted.quantile(sgdd,w=BA, prob=0.475)[[1]]~"midtemp",
+                               sgdd>weighted.quantile(sgdd,w=BA, prob=0.95)[[1]]~"hot"),
+         margin.wai=case_when(wai<weighted.quantile(wai,w=BA, prob=0.05)[[1]]~"arid",
+                              wai<weighted.quantile(wai,w=BA, prob=0.525)[[1]]&
+                                 wai>weighted.quantile(wai,w=BA, prob=0.475)[[1]]~"midhum",
+                               wai>weighted.quantile(wai,w=BA, prob=0.95)[[1]]~"humid"),
+         cor.wai.sgdd=cor(wai,sgdd,use="complete.obs"),
+         weight=fecGmMu_plot/(se_plot^(3/2))) |> 
+  pivot_longer(cols=c("margin.sgdd","margin.wai"),
+               names_to="margin.type",
+               values_to="margin.val") |> 
+  filter(!is.na(margin.val)) |> # position importante pour le scaling!!
+  mutate(margin.val=factor(margin.val,levels=c("midtemp","cold","hot","midhum","arid","humid"))) |> 
+         # ISP=(ISP-weighted.mean(ISP,w=1/cv_plot))/sqrt(weighted.var(ISP,w=1/cv_plot))) |>
+  ungroup() |>
+  as.data.table()
+sp.dataset.lm |> 
+  sample_n(50000) |> 
+  ggplot(aes(weight,ISP))+
+  geom_point()+
+  scale_x_log10()
+
+summary.mod=data.frame(species=unique(sp.dataset.lm$species),
+                       margincold.est=NA,
+                       margincold.sd=NA,
+                       marginhot.est=NA,
+                       marginhot.sd=NA,
+                       marginhum.est=NA,
+                       marginhum.sd=NA,
+                       margindry.est=NA,
+                       margindry.sd=NA)
+for(sp in unique(sp.dataset.lm$species)){
+  print(sp)
+  sp.lm=sp.dataset.lm |> 
+    filter(species==sp) |> 
+    mutate(ISP=scale(ISP)[,])
+  # sp.lm |> 
+  #   ggplot(aes(ISP))+geom_density()
+  lm.sgdd=lm(ISP~margin.val,
+            weights = weight, #1/cv_plot
+            data=sp.lm |> 
+              filter(margin.type=="margin.sgdd"))
+  lm.wai=lm(ISP~margin.val,
+            weights = weight,
+            data=sp.lm |> 
+              filter(margin.type=="margin.wai"))
+  # sp.lm |>
+  #   filter(margin.type=="margin.wai") |>
+  #   ggplot()+
+  #   geom_boxplot(aes(margin.val,ISP,weight=1/cv_plot))
+  summary.mod[summary.mod$species==sp,-1]=
+    c(summary(lm.sgdd)$coef["margin.valcold","Estimate"],
+      summary(lm.sgdd)$coef["margin.valcold","Std. Error"],
+      summary(lm.sgdd)$coef["margin.valhot","Estimate"],
+      summary(lm.sgdd)$coef["margin.valhot","Std. Error"],
+      summary(lm.wai)$coef["margin.valhumid","Estimate"],
+      summary(lm.wai)$coef["margin.valhumid","Std. Error"],
+      summary(lm.wai)$coef["margin.valarid","Estimate"],
+      summary(lm.wai)$coef["margin.valarid","Std. Error"])
+}
+
+summary.mod |> 
+  # mutate(weight=abs(mean/sd)) |> 
+  pivot_longer(cols=-species) |> 
+  separate(name,into=c("margin","val")) |> 
+  pivot_wider(names_from = val,
+              values_from = value) |> 
+  left_join(sp.dataset |> select(species,block) |> unique()) |>
+  mutate(margin.type=case_when(grepl("cold|hot",margin)~"sgdd",
+                               TRUE~"wai")) |> 
+  ggplot()+
+  geom_density(aes(x=est,y=..density..,weight=1/sd,color=block))+
+  geom_vline(xintercept = 0)+
+  facet_wrap(~margin)
+
+summary.mod |> 
+  # mutate(weight=abs(mean/sd)) |> 
+  pivot_longer(cols=-species) |> 
+  separate(name,into=c("margin","val")) |> 
+  pivot_wider(names_from = val,
+              values_from = value) |> 
+  left_join(sp.dataset |> select(species,block) |> unique()) |>
+  mutate(margin.type=case_when(grepl("cold|hot",margin)~"sgdd",
+                               TRUE~"wai")) |> 
+  ggplot()+
+  geom_violin(aes(est,margin,weight=1/sd,color=block))
+summary.mod1 |> 
+  # mutate(weight=abs(mean/sd)) |> 
+  pivot_longer(cols=-species) |> 
+  separate(name,into=c("margin","val")) |> 
+  pivot_wider(names_from = val,
+              values_from = value) |> 
+  left_join(sp.dataset |> select(species,block) |> unique()) |>
+  mutate(margin.type=case_when(grepl("cold|hot",margin)~"sgdd",
+                               TRUE~"wai")) |> 
+  ggplot()+
+  geom_violin(aes(est,margin,weight=1/sd,color=block))
+  
+summary.mod |> 
+  left_join(sp.dataset |> select(species,block,cor.wai.sgdd) |> unique()) |>
+  ggplot(aes(margincold.est,marginhot.est,color=block))+
+  geom_point()+
+  coord_equal() + geom_hline(yintercept = 0) + geom_vline(xintercept = 0)
+summary.mod |> 
+  ggplot(aes(margincold.est,margindry.est))+
+  geom_point()+
+  coord_equal() + geom_hline(yintercept = 0) + geom_vline(xintercept = 0)
+summary.mod |> 
+  left_join(sp.dataset |> select(species,block) |> unique()) |>
+  ggplot(aes(marginhum.est,margindry.est,color=block))+
+  geom_point()+
+  coord_equal() + geom_hline(yintercept = 0) + geom_vline(xintercept = 0)
+
+
+summary.mod |> 
+  left_join(sp.dataset |> select(species,block,cor.wai.sgdd) |> unique()) |>
+  ggplot(aes(marginhot.est,margincold.est,color=cor.wai.sgdd>0))+
+  geom_point()+ geom_hline(yintercept = 0) + geom_vline(xintercept = 0)
+
+
+summary.mod |> 
+  # mutate(weight=abs(mean/sd)) |> 
+  pivot_longer(cols=-species) |> 
+  separate(name,into=c("margin","val")) |> 
+  pivot_wider(names_from = val,
+              values_from = value) |> 
+  left_join(sp.dataset.lm |> select(species,cor.wai.sgdd) |> unique()) |>
+  left_join(phylo.select |>  select(species,taxa,block)) |> 
+  mutate(margin.type=case_when(grepl("cold|hot",margin)~"sgdd",
+                               TRUE~"wai")) |> 
+  ggplot(aes(cor.wai.sgdd,est,col=block))+
+  geom_point()+
+  geom_smooth(method="lm",aes(color=NULL))+
+  facet_wrap(~margin)
+
+sp.dataset.lm |> 
+  # filter(species%in% species.sample) |> 
+  ggplot()+
+  geom_density(aes(x=log(ISP),y=..density..,weight=1/cv_plot,color=species))+
+  theme(legend.position = "none")+
+  facet_wrap(~species,scales="free")
+sp.dataset.lm |> 
+  # filter(species%in% species.sample) |> 
+  ggplot()+
+  geom_density(aes(x=log(ISP),y=..density..,weight=weight,color=species))+
+  theme(legend.position = "none")+
+  facet_wrap(~species,scales="free")
+```
+
+# Test of effect of correlation
+
+```{r}
+sp.dataset.lm=rbind(fecundity.eu_clim |> mutate(block="europe"),
+                 fecundity.am_clim|> mutate(block="america")) |>
+  filter(BA!=0) |> #rm absences
+  # filter(ISP<quantile(ISP,probs=0.97)) |>  # remove extreme values
+  group_by(species) |> 
+  mutate(cv_plot=if_else(is.na(cv_plot),mean(cv_plot,na.rm=TRUE),cv_plot)) |> # compute cv for missing values
+  # compute weighted quantiles of sgdd and wai, and correlation between wai and sgdd
+  mutate(margin=case_when(sgdd<weighted.quantile(sgdd,w=BA, prob=0.05)[[1]]&
+                                 wai<weighted.quantile(wai,w=BA, prob=0.05)[[1]]~"colddry",
+                               sgdd<weighted.quantile(sgdd,w=BA, prob=0.05)[[1]]&
+                                 wai<weighted.quantile(wai,w=BA, prob=0.525)[[1]]&
+                                 wai>weighted.quantile(wai,w=BA, prob=0.475)[[1]]~"coldint",
+                               sgdd<weighted.quantile(sgdd,w=BA, prob=0.05)[[1]]&
+                                 wai>weighted.quantile(wai,w=BA, prob=0.95)[[1]]~"coldhum",
+                               sgdd<weighted.quantile(sgdd,w=BA, prob=0.525)[[1]]&
+                                 sgdd>weighted.quantile(sgdd,w=BA, prob=0.475)[[1]]&
+                                 wai<weighted.quantile(wai,w=BA, prob=0.05)[[1]]~"intdry",
+                               sgdd<weighted.quantile(sgdd,w=BA, prob=0.525)[[1]]&
+                                 sgdd>weighted.quantile(sgdd,w=BA, prob=0.475)[[1]]&
+                                 wai<weighted.quantile(wai,w=BA, prob=0.525)[[1]]&
+                                 wai>weighted.quantile(wai,w=BA, prob=0.475)[[1]]~"int",
+                                sgdd<weighted.quantile(sgdd,w=BA, prob=0.525)[[1]]&
+                                 sgdd>weighted.quantile(sgdd,w=BA, prob=0.475)[[1]]&
+                                 wai>weighted.quantile(wai,w=BA, prob=0.95)[[1]]~"inthum",
+                               sgdd>weighted.quantile(sgdd,w=BA, prob=0.95)[[1]]&
+                                 wai<weighted.quantile(wai,w=BA, prob=0.05)[[1]]~"hotdry",
+                               sgdd>weighted.quantile(sgdd,w=BA, prob=0.95)[[1]]&
+                                 wai<weighted.quantile(wai,w=BA, prob=0.525)[[1]]&
+                                 wai>weighted.quantile(wai,w=BA, prob=0.475)[[1]]~"hotint",
+                               sgdd>weighted.quantile(sgdd,w=BA, prob=0.95)[[1]]&
+                                 wai>weighted.quantile(wai,w=BA, prob=0.95)[[1]]~"hothum"),
+         weight=fecGmMu_plot/(se_plot^(3/2))) |> 
+  filter(!is.na(margin)) |> # position importante pour le scaling!!
+  mutate(cor.wai.sgdd=cor(wai,sgdd,use="complete.obs"),
+         margin=factor(margin,levels=c("colddry","coldint","coldhum","intdry","int","inthum","hotdry","hotint","hothum"))) |> 
+         # ISP=(ISP-weighted.mean(ISP,w=1/cv_plot))/sqrt(weighted.var(ISP,w=1/cv_plot))) |>
+  ungroup() |>
+  as.data.table()
+
+sp.dataset.lm |> 
+  select(species,cor.wai.sgdd,block) |> 
+  unique() |> 
+  ggplot(aes(cor.wai.sgdd,
+           color=block))+
+  geom_density()
+
+sp.dataset.lm |> 
+  mutate(ISP=scale(ISP)) |> 
+  ggplot(aes(margin,ISP))+
+  geom_boxplot()+
+  scale_y_log10()
+
+sp.dataset.lm |> 
+  ggplot(aes(margin))+
+  geom_histogram(stat="count")+
+  facet_wrap(~species)
+sp.dataset.lm |>
+  ggplot(aes(sgdd,wai,color=margin))+
+  geom_point() +
+  geom_smooth()+
+  facet_wrap(~species)
+
+rbind(fecundity.eu_clim |> mutate(block="europe"),
+                 fecundity.am_clim|> mutate(block="america")) |>
+  filter(BA!=0) |> #rm absences
+  # filter(ISP<quantile(ISP,probs=0.97)) |>  # remove extreme values
+  group_by(species) |> 
+  mutate(cv_plot=if_else(is.na(cv_plot),mean(cv_plot,na.rm=TRUE),cv_plot)) |> # compute cv for missing values
+  # compute weighted quantiles of sgdd and wai, and correlation between wai and sgdd
+  mutate(margin=case_when(sgdd<weighted.quantile(sgdd,w=BA, prob=0.05)[[1]]~"cold",
+                          sgdd<weighted.quantile(sgdd,w=BA, prob=0.525)[[1]]&
+                            sgdd>weighted.quantile(sgdd,w=BA, prob=0.475)[[1]]~"midtemp",
+                          sgdd>weighted.quantile(sgdd,w=BA, prob=0.95)[[1]]~"hot"),
+         margin.wai=case_when(wai<weighted.quantile(wai,w=BA, prob=0.05)[[1]]~"arid",
+                              wai<weighted.quantile(wai,w=BA, prob=0.525)[[1]]&
+                                 wai>weighted.quantile(wai,w=BA, prob=0.475)[[1]]~"midhum",
+                               wai>weighted.quantile(wai,w=BA, prob=0.95)[[1]]~"humid"),
+         weight=fecGmMu_plot/(se_plot^(3/2))) |> 
+  pivot_longer(cols=c("margin.sgdd","margin.wai"),
+               names_to="margin.type",
+               values_to="margin.val") |> 
+  filter(!is.na(margin.val)) |> # position importante pour le scaling!!
+  mutate(cor.wai.sgdd=cor(wai,sgdd,use="complete.obs"),
+         margin.val=factor(margin.val,levels=c("midtemp","cold","hot","midhum","arid","humid"))) |> 
+         # ISP=(ISP-weighted.mean(ISP,w=1/cv_plot))/sqrt(weighted.var(ISP,w=1/cv_plot))) |>
+  ungroup() |>
+  as.data.table()
+
+
+species.sample= sample(unique(sp.dataset.lm$species),8)
+rbind(fecundity.eu_clim |> mutate(block="europe"),
+                 fecundity.am_clim|> mutate(block="america")) |>
+  filter(BA!=0) |> #rm absences
+  # filter(ISP<quantile(ISP,probs=0.97)) |>  # remove extreme values
+  group_by(species) |> 
+  mutate(cv_plot=if_else(is.na(cv_plot),mean(cv_plot,na.rm=TRUE),cv_plot)) |> # compute cv for missing values
+  mutate(cor.wai.sgdd=cor(wai,sgdd,use="complete.obs"),
+         mean.wai=mean(wai,na.rm=FALSE),
+         mean.sgdd=mean(sgdd,na.rm=FALSE)) |> 
+  ungroup() |> 
+  # filter(species %in% species.sample) |> 
+  ggplot(aes(wai,sgdd,color=cor.wai.sgdd))+
+  geom_point(alpha=0.5) + 
+  geom_smooth(method="lm")+
+  facet_wrap(~species)
+
+
+rbind(fecundity.eu_clim |> mutate(block="europe"),
+                 fecundity.am_clim|> mutate(block="america")) |>
+  filter(BA!=0) |> #rm absences
+  # filter(ISP<quantile(ISP,probs=0.97)) |>  # remove extreme values
+  group_by(species) |> 
+  mutate(cv_plot=if_else(is.na(cv_plot),mean(cv_plot,na.rm=TRUE),cv_plot)) |> # compute cv for missing values
+  # compute weighted quantiles of sgdd and wai, and correlation between wai and sgdd
+  mutate(margin=case_when(sgdd<weighted.quantile(sgdd,w=BA, prob=0.05)[[1]]&
+                                 wai<weighted.quantile(wai,w=BA, prob=0.05)[[1]]~"colddry",
+                               sgdd<weighted.quantile(sgdd,w=BA, prob=0.05)[[1]]&
+                                 wai<weighted.quantile(wai,w=BA, prob=0.525)[[1]]&
+                                 wai>weighted.quantile(wai,w=BA, prob=0.475)[[1]]~"coldint",
+                               sgdd<weighted.quantile(sgdd,w=BA, prob=0.05)[[1]]&
+                                 wai>weighted.quantile(wai,w=BA, prob=0.95)[[1]]~"coldhum",
+                               sgdd<weighted.quantile(sgdd,w=BA, prob=0.525)[[1]]&
+                                 sgdd>weighted.quantile(sgdd,w=BA, prob=0.475)[[1]]&
+                                 wai<weighted.quantile(wai,w=BA, prob=0.05)[[1]]~"intdry",
+                               sgdd<weighted.quantile(sgdd,w=BA, prob=0.525)[[1]]&
+                                 sgdd>weighted.quantile(sgdd,w=BA, prob=0.475)[[1]]&
+                                 wai<weighted.quantile(wai,w=BA, prob=0.525)[[1]]&
+                                 wai>weighted.quantile(wai,w=BA, prob=0.475)[[1]]~"int",
+                                sgdd<weighted.quantile(sgdd,w=BA, prob=0.525)[[1]]&
+                                 sgdd>weighted.quantile(sgdd,w=BA, prob=0.475)[[1]]&
+                                 wai>weighted.quantile(wai,w=BA, prob=0.95)[[1]]~"inthum",
+                               sgdd>weighted.quantile(sgdd,w=BA, prob=0.95)[[1]]&
+                                 wai<weighted.quantile(wai,w=BA, prob=0.05)[[1]]~"hotdry",
+                               sgdd>weighted.quantile(sgdd,w=BA, prob=0.95)[[1]]&
+                                 wai<weighted.quantile(wai,w=BA, prob=0.525)[[1]]&
+                                 wai>weighted.quantile(wai,w=BA, prob=0.475)[[1]]~"hotint",
+                               sgdd>weighted.quantile(sgdd,w=BA, prob=0.95)[[1]]&
+                                 wai>weighted.quantile(wai,w=BA, prob=0.95)[[1]]~"hothum"),
+         weight=fecGmMu_plot/(se_plot^(3/2))) |> 
+  mutate(cor.wai.sgdd=cor(wai,sgdd,use="complete.obs"),
+         margin=factor(margin,levels=c("colddry","coldint","coldhum","intdry","int","inthum","hotdry","hotint","hothum"))) |> 
+         # ISP=(ISP-weighted.mean(ISP,w=1/cv_plot))/sqrt(weighted.var(ISP,w=1/cv_plot))) |>
+  ungroup() |>
+  ggplot(aes(wai,sgdd,color=margin))+
+  geom_point(alpha=0.5) + 
+  geom_smooth(aes(color=NULL),method="lm")+
+  facet_wrap(~species)
+  
+
+
+
+
+
+
+
+
+
+
+
+
+```
+```{r}
+rbind(fecundity.eu_clim |> mutate(block="europe"),
+                 fecundity.am_clim|> mutate(block="america")) |>
+  filter(BA!=0) |> #rm absences
+  # filter(ISP<quantile(ISP,probs=0.97)) |>  # remove extreme values
+  group_by(species) |> 
+  mutate(cv_plot=if_else(is.na(cv_plot),mean(cv_plot,na.rm=TRUE),cv_plot)) |> # compute cv for missing values
+  # compute weighted quantiles of sgdd and wai, and correlation between wai and sgdd
+  mutate(margin.sgdd=case_when(sgdd<weighted.quantile(sgdd,w=BA, prob=0.05)[[1]]~"cold",
+                               sgdd<weighted.quantile(sgdd,w=BA, prob=0.525)[[1]]&
+                                 sgdd>weighted.quantile(sgdd,w=BA, prob=0.475)[[1]]~"midtemp",
+                               sgdd>weighted.quantile(sgdd,w=BA, prob=0.95)[[1]]~"hot"),
+         margin.wai=case_when(wai<weighted.quantile(wai,w=BA, prob=0.05)[[1]]~"arid",
+                              wai<weighted.quantile(wai,w=BA, prob=0.525)[[1]]&
+                                 wai>weighted.quantile(wai,w=BA, prob=0.475)[[1]]~"midhum",
+                               wai>weighted.quantile(wai,w=BA, prob=0.95)[[1]]~"humid"),
+         cor.wai.sgdd=cor(wai,sgdd,use="complete.obs")) |> 
+  pivot_longer(cols=c("margin.sgdd","margin.wai"),
+               names_to="margin.type",
+               values_to="margin.val") |> 
+  filter(!is.na(margin.val)) |> # position importante pour le scaling!!
+  mutate(margin.val=factor(margin.val,levels=c("midtemp","cold","hot","midhum","arid","humid"))) |> 
+         # ISP=(ISP-weighted.mean(ISP,w=1/cv_plot))/sqrt(weighted.var(ISP,w=1/cv_plot))) |>
+  ungroup() |> 
+  mutate(ISP=log(ISP)) |>
+  pivot_wider(names_from = "margin.type",
+              values_from = "margin.val") |> 
+  # mutate(across(matches("margin"),~replace_na(as.character(.x),"inter"))) |> 
+  mutate(margin.sgdd=case_when(is.na(margin.sgdd)~"midtemp",
+                               TRUE~as.character(margin.sgdd)),
+         margin.wai=case_when(is.na(margin.wai)~"midhum",
+                               TRUE~as.character(margin.wai))) |> 
+  mutate(margin.sgdd=factor(margin.sgdd,levels=c("cold","midtemp","hot")),
+         margin.wai=factor(margin.wai,levels=c("arid","midhum","humid"))) |> 
+  ggplot(aes(margin.sgdd,ISP,color=margin.wai))+
+  geom_boxplot()+
+  scale_y_log10()+
+  facet_wrap(~species,scales="free")->p
+
+```
+
