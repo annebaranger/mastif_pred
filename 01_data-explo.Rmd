@@ -341,7 +341,7 @@ for (sp in unique(df.tree$species)){
   error=function(e)print("sp not in mastifrange")
   )
 
-  for (t in seq(0,-100,-5)){
+  for (t in seq(0,-100,-1)){
     print(t)
     # save t_rank
     if(any(selection.sp$stat=="rank"&selection.sp$dif<t)){
@@ -369,8 +369,10 @@ select.robustness |>
   # mutate(species=forcats::fct_reorder2(as.factor(species),t_rank,t_quant)) |>
   # mutate(species=forcats::fct_reorder(as.factor(species),t_quant)) |> 
   pivot_longer(cols=-species) |> 
-  ggplot(aes(value,species,color=name))+
-  geom_point()
+  ggplot(aes(species,value,color=name))+
+  geom_point()+
+  theme(axis.text.x = element_text(angle=45),
+        axis.title = element_blank())
 ```
 
 
