@@ -119,6 +119,21 @@ df.mastif.tree |>
         axis.text = element_blank(),
         legend.position = "none")+
   labs(color="Species")
+
+df.mastif.tree |> 
+  filter(species %in% df.species$species) |> 
+  select(plotID,lon,lat) |> 
+  distinct() |> 
+  ggplot() +
+  geom_sf(data=worldmap,fill=NA) +
+  geom_point(aes(x=lon,y=lat))+
+  xlim(range(df.species[,c("minlon","maxlon")])) + 
+  ylim(range(df.species[,c("minlat","maxlat")]))+
+  theme_minimal()+
+  theme(axis.title = element_blank(),
+        axis.text = element_blank(),
+        legend.position = "none")+
+  labs(color="Species")
 ```
 
 

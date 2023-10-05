@@ -10,7 +10,7 @@ knitr::opts_chunk$set(echo = FALSE, warning = FALSE,message=FALSE)
 library(targets)
 lapply(c("stringr","tidyr","dplyr","tibble","data.table", # data analysis
          "ggplot2","viridis", # plot
-         "factoextra", "modi", "nlme",# specific computation #taxize
+         "factoextra", "modi", "nlme","rstatix","multcomp","emmeans",# stat & models
          "rworldmap" # geographic data #terre, sf
          ),require,character.only=TRUE)
 theme_set(theme_minimal()) # ggplot theme
@@ -47,15 +47,34 @@ df.gbif.short <- species_selection$df.gbif |>
 
 #compute climate range
 df.range<-species_selection$df.gbif |> 
-    select(species,clim,clim_niche) |> 
+    dplyr::select(species,clim,clim_niche) |> 
     filter(grepl("range",clim)) |> 
     separate(clim,into=c("var","drop")) |> 
-    select(-drop) |> 
+    dplyr::select(-drop) |> 
     rename(range="clim_niche")
 
 ## fecundity data ##
 tar_load(fecundity.eu_clim,store="target_nfi")
 tar_load(fecundity.am_clim,store="target_nfi")
+
+bolker_ci <- function(model, newdat, pred_int = FALSE, conf_level = 0.95) {
+  if(class(model) != "lme") {
+    stop("works for lme-models only")
+  }
+  z <- round(qnorm((1-conf_level)/2, lower.tail = FALSE), 2)
+  newdat$pred <- predict(model, newdat, level = 0)
+  Designmat <- model.matrix(formula(model)[-2], newdat)
+  predvar <- diag(Designmat %*% vcov(model) %*% t(Designmat))
+  newdat$se <- sqrt(predvar)
+  newdat$ci_l <- newdat$pred - z*newdat$se
+  newdat$ci_h <- newdat$pred + z*newdat$se
+  if(pred_int == TRUE) {
+    newdat$se2 <- sqrt(predvar+model$sigma^2)
+    newdat$predint_l <- newdat$pred - z*newdat$se2
+    newdat$predint_h <- newdat$pred + z*newdat$se2
+  }
+  newdat
+}
 ```
 
 # Data description
@@ -89,6 +108,33 @@ fecundity.eu_clim
 
 -> fecundity datasets are long formats of nfi plots crossed by species list. It includes non-occurence of species.
 
+# Map of data
+
+```{r}
+worldmap <- sf::st_as_sf(getMap(resolution = "high"))
+
+
+# plots of selected species
+rbind(fecundity.eu_clim |> mutate(block="europe"),
+                 fecundity.am_clim|> mutate(block="america")) |>
+  filter(BA!=0) |> 
+  dplyr::select(plot,lat,lon,sgdd,wai) |> 
+  unique() |> 
+  sample_frac(0.1) |> 
+  ggplot() +
+  geom_sf(data=worldmap,fill=NA) +
+  geom_point(aes(x=lon,y=lat,color=sgdd))+
+  xlim(-135,24) + 
+  ylim(27,73)+
+  theme_minimal()+
+  theme(axis.title = element_blank(),
+        axis.text = element_blank(),
+        legend.position = "none")+
+  ggtitle("10 % of NFI plots")
+
+```
+
+
 # Check repartition of species climate in their continent
 
 ```{r nfi_check}
@@ -105,7 +151,7 @@ fecundity.eu_clim |>
 fecundity.am_clim |> 
   group_by(plot) |> 
   mutate(occ=(sum(BA>0)!=0)) |> 
-  select(plot,occ,PC1,PC2) |> unique() |> 
+  dplyr::select(plot,occ,PC1,PC2) |> unique() |> 
   ungroup() |> 
   # sample_n(50000) |> 
   ggplot(aes(PC1,PC2,color=occ))+
@@ -190,7 +236,7 @@ stat.data<-rbind(fecundity.eu_clim |> mutate(block="europe"),
   mutate(cv_plot=if_else(is.na(cv_plot),mean(cv_plot,na.rm=TRUE),cv_plot)) |> # compute cv for missing values
   ungroup() |>
   mutate(ISP=scale(log(ISP))) |>
-  select(ISP,block,cv_plot)
+  dplyr::select(ISP,block,cv_plot)
 
 stat.test<-stat.data |> 
   t_test(ISP~block) |> 
@@ -200,11 +246,12 @@ stat.test<-stat.data |>
 stat.data |> 
   ggplot()+ #,weight=1/cv_plot
   geom_boxplot(aes(block,ISP,fill=block),outlier.colour = NA)+ # not working if aes is directly in ggplot
-  stat_pvalue_manual(stat.test,label="t-test {p.signif}",tip.length = 0)+
+  ggpubr::stat_pvalue_manual(stat.test,label="t-test {p.signif}",tip.length = 0)+
   theme(legend.position = "none",
         axis.title.x = element_blank())+
-  scale_fill_manual(values=c("firebrick3","cornflowerblue"))
-
+  scale_fill_manual(values=c("firebrick3","cornflowerblue"))->p
+p
+ggsave("continent_comp.pdf",plot=p)
 rm(stat.data,stat.test)
 ```
 
@@ -279,25 +326,6 @@ rbind(fecundity.eu_clim |> mutate(block="europe"),
 Each model shows that the margin tested has an effect on fecundity.
 
 ```{r lmmPerMargin}
-bolker_ci <- function(model, newdat, pred_int = FALSE, conf_level = 0.95) {
-  if(class(model) != "lme") {
-    stop("works for lme-models only")
-  }
-  z <- round(qnorm((1-conf_level)/2, lower.tail = FALSE), 2)
-  newdat$pred <- predict(model, newdat, level = 0)
-  Designmat <- model.matrix(formula(model)[-2], newdat)
-  predvar <- diag(Designmat %*% vcov(model) %*% t(Designmat))
-  newdat$se <- sqrt(predvar)
-  newdat$ci_l <- newdat$pred - z*newdat$se
-  newdat$ci_h <- newdat$pred + z*newdat$se
-  if(pred_int == TRUE) {
-    newdat$se2 <- sqrt(predvar+model$sigma^2)
-    newdat$predint_l <- newdat$pred - z*newdat$se2
-    newdat$predint_h <- newdat$pred + z*newdat$se2
-  }
-  newdat
-}
-
 # for SGDD #
 
 # run lmer model
@@ -320,7 +348,7 @@ sp.mod |>
 
 # predictions 
 data.predict=sp.mod |> 
-  select(block,margin.val) |> 
+  dplyr::select(block,margin.val) |> 
   unique()
 
 data.predict<-bolker_ci(mod.lme,data.predict)
@@ -335,7 +363,37 @@ data.predict |>
   scale_color_manual(values=c("firebrick3","cornflowerblue"))+
   labs(x="Margin relative to the SGDD gradient",
        y="Predictions",
-       color="Continent")
+       color="Continent")->p
+p
+# ggsave("sgddmargin.pdf",plot=p)
+
+mod.means=emmeans(object=mod.lme,
+        specs=~margin.val*block)
+data_pred=cld(object=mod.means,
+    adjust="Tukey",
+    Letters=letters,
+    alpha=0.05)
+adjust_width <- 0.05  # valeur à ajuster selon vos besoins
+
+data_pred_adj <- as.data.frame(data_pred) %>%
+  mutate(margin.val = if_else(margin.val == "midtemp", "Core", stringr::str_to_title(margin.val)),
+         x_adjusted = as.numeric(as.factor(margin.val))/4 + if_else(block == "america", adjust_width, 0))
+
+ggplot(data_pred_adj, aes(color = block)) +
+  geom_point(aes(x_adjusted, emmean)) +
+  geom_segment(aes(x = x_adjusted, xend = x_adjusted, y = lower.CL, yend = upper.CL)) +
+  scale_color_manual(values = c("firebrick3", "cornflowerblue")) +
+  geom_text(aes(label = str_trim(.group), x = x_adjusted, y = emmean), hjust = 1.5) +
+  labs(x = "Margin relative to the SGDD gradient",
+       y = "Predictions",
+       color = "Continent") +
+  scale_x_continuous(breaks = as.numeric(as.factor(unique(data_pred_adj$margin.val)))/4, 
+                     labels = unique(data_pred_adj$margin.val))->q
+q
+ggsave(filename="sgddmargin_tukey.pdf",scale=1.8,width=15,height=8,units="cm",plot=q)
+
+  
+
 
 # for WAI #
 sp.mod=sp.dataset |> filter(margin.type=="margin.wai") |> 
@@ -352,7 +410,7 @@ sp.mod |>
 
 # predictions 
 data.predict=sp.mod |> 
-  select(block,margin.val) |> 
+  dplyr::select(block,margin.val) |> 
   unique()
 
 data.predict<-bolker_ci(mod.lme,data.predict)
@@ -367,12 +425,85 @@ data.predict |>
   scale_color_manual(values=c("firebrick3","cornflowerblue"))+
   labs(x="Margin relative to the WAI gradient",
        y="Predictions",
-       color="Continent")
+       color="Continent")->p
+p
+# ggsave("waimargin.pdf",plot=p)
+mod.means=emmeans(object=mod.lme,
+        specs=~margin.val*block)
+data_pred=cld(object=mod.means,
+    adjust="Tukey",
+    Letters=letters,
+    alpha=0.05)
+adjust_width <- 0.05  # valeur à ajuster selon vos besoins
+
+data_pred_adj <- as.data.frame(data_pred) %>%
+  mutate(margin.val = if_else(margin.val == "midhum", "Core", stringr::str_to_title(margin.val)),
+         x_adjusted = as.numeric(as.factor(margin.val))/4 + if_else(block == "america", adjust_width, 0))
+
+ggplot(data_pred_adj, aes(color = block)) +
+  geom_point(aes(x_adjusted, emmean)) +
+  geom_segment(aes(x = x_adjusted, xend = x_adjusted, y = lower.CL, yend = upper.CL)) +
+  scale_color_manual(values = c("firebrick3", "cornflowerblue")) +
+  geom_text(aes(label = str_trim(.group), x = x_adjusted, y = emmean), hjust = 1.5) +
+  labs(x = "Margin relative to the SGDD gradient",
+       y = "Predictions",
+       color = "Continent") +
+  scale_x_continuous(breaks = as.numeric(as.factor(unique(data_pred_adj$margin.val)))/4, 
+                     labels = unique(data_pred_adj$margin.val))->q
+q
+ggsave(filename="waimargin_tukey.pdf",scale=1.8,width=15,height=8,units="cm",plot=q)
+  
 
 
 rm(mod.lme,sp.mod)
-
+summary(mod.means)
 ```
+
+
+
+```{r tukeytest, eval=FALSE, include=FALSE}
+sp.mod=sp.dataset |> filter(margin.type=="margin.sgdd") |> 
+  mutate(margin.val=factor(margin.val,levels=c("cold","midtemp","hot")))
+sp.mod |> 
+  group_by(species,margin.val) |> 
+  summarise(n=n())
+
+
+mod.lme=lme(ISP~margin.val*block,random=~1|species,weights=varFixed(~cv_plot),data=sp.mod)
+summary(mod.lme)
+anova(mod.lme)
+
+mod.means=emmeans(object=mod.lme,
+        specs=~margin.val*block)
+contrast(mod.means)
+pairs(mod.means)
+data_pred=cld(object=mod.means,
+    adjust="bonferroni",
+    Letters=letters,
+    alpha=0.05)
+
+
+adjust_width <- 0.05  # valeur à ajuster selon vos besoins
+
+data_pred_adj <- as.data.frame(data_pred) %>%
+  mutate(margin.val = if_else(margin.val == "midtemp", "Core", stringr::str_to_title(margin.val)),
+         x_adjusted = as.numeric(as.factor(margin.val))/4 + if_else(block == "america", adjust_width, 0))
+
+ggplot(data_pred_adj, aes(color = block)) +
+  geom_point(aes(x_adjusted, emmean)) +
+  geom_segment(aes(x = x_adjusted, xend = x_adjusted, y = lower.CL, yend = upper.CL)) +
+  scale_color_manual(values = c("firebrick3", "cornflowerblue")) +
+  geom_text(aes(label = str_trim(.group), x = x_adjusted, y = emmean), hjust = 1.5) +
+  labs(x = "Margin relative to the SGDD gradient",
+       y = "Predictions",
+       color = "Continent") +
+  scale_x_continuous(breaks = as.numeric(as.factor(unique(data_pred_adj$margin.val)))/4, 
+                     labels = unique(data_pred_adj$margin.val))
+
+table(sp.mod$block)
+```
+
+
 
 # Hypothesis 2 : fecundity is even higher when the hot margin is also humid.
 _Hypothesis_
@@ -401,12 +532,14 @@ fecundity.eu_clim |>
   ungroup() |> group_by(species,wai,sgdd) |> 
   mutate(ISP.mean=weighted.mean(ISP,w=1/cv_plot)) |> 
   ungroup() |>
-  select(species,sgdd,wai,ISP.mean,cv_plot) |> 
+  dplyr::select(species,sgdd,wai,ISP.mean,cv_plot) |> 
   ggplot(aes(x = sgdd, y = wai, fill = ISP.mean)) +
   geom_tile() +
   scale_fill_gradientn(colours = viridis(15))+
   theme(axis.text = element_blank())+
-  facet_wrap(~species,scales="free")
+  facet_wrap(~species,scales="free")->p
+p
+# ggsave("2Dfecundity.pdf",plot=p)
 ```
 Idem all species together and considering only margins and core areas.
 
@@ -414,7 +547,7 @@ Idem all species together and considering only margins and core areas.
 rbind(fecundity.eu_clim |> mutate(block="europe"),
                  fecundity.am_clim|> mutate(block="america")) |>
 # fecundity.eu_clim |>
-  mutate(block="europe") |> 
+  # mutate(block="europe") |> 
   filter(BA!=0) |> #rm absences
   # filter(ISP<quantile(ISP,probs=0.97)) |>  # remove extreme values
   group_by(species) |> 
@@ -459,6 +592,75 @@ rbind(fecundity.eu_clim |> mutate(block="europe"),
   scale_fill_gradientn(colours = viridis(15))+
   facet_wrap(~species)
 ```
+
+```{r 2DrepN}
+rbind(fecundity.eu_clim |> mutate(block="europe"),
+                 fecundity.am_clim|> mutate(block="america")) |>
+  filter(BA!=0) |> #rm absences
+  # filter(ISP<quantile(ISP,probs=0.97)) |>  # remove extreme values
+  group_by(species) |> 
+  mutate(cv_plot=if_else(is.na(cv_plot),mean(cv_plot,na.rm=TRUE),cv_plot)) |> # compute cv for missing values
+  # compute weighted quantiles of sgdd and wai, and correlation between wai and sgdd
+  mutate(margin.sgdd=case_when(sgdd<weighted.quantile(sgdd,w=BA, prob=0.2)[[1]]~"cold",
+                               sgdd<weighted.quantile(sgdd,w=BA, prob=0.6)[[1]]&
+                                 sgdd>weighted.quantile(sgdd,w=BA, prob=0.4)[[1]]~"midtemp",
+                               sgdd>weighted.quantile(sgdd,w=BA, prob=0.8)[[1]]~"hot"),
+         margin.wai=case_when(wai<weighted.quantile(wai,w=BA, prob=0.2)[[1]]~"arid",
+                              wai<weighted.quantile(wai,w=BA, prob=0.6)[[1]]&
+                                 wai>weighted.quantile(wai,w=BA, prob=0.4)[[1]]~"midhum",
+                               wai>weighted.quantile(wai,w=BA, prob=0.8)[[1]]~"humid"),
+         cor.wai.sgdd=cor(wai,sgdd,use="complete.obs")) |> 
+  mutate(margin.sgdd=factor(margin.sgdd,levels=c("cold","midtemp","hot")),
+         margin.wai=factor(margin.wai,levels=c("arid","midhum","humid"))) |> 
+  filter(!is.na(margin.sgdd)&!is.na(margin.wai)) |>
+  ungroup() |> 
+  mutate(ISP=scale(log(ISP))) |>  
+  group_by(species,margin.sgdd,margin.wai) |> 
+  summarise(n=n()) |>
+  ungroup() |> group_by(species) |> 
+  mutate(n=scale(n)) |> 
+  ggplot(aes(margin.wai,margin.sgdd,fill=n))+
+  geom_tile()+
+  scale_fill_gradientn(colours = viridis(15))+
+  facet_wrap(~species)
+
+rbind(fecundity.eu_clim |> mutate(block="europe"),
+                 fecundity.am_clim|> mutate(block="america")) |>
+  filter(BA!=0) |> #rm absences
+  # filter(ISP<quantile(ISP,probs=0.97)) |>  # remove extreme values
+  group_by(species) |> 
+  mutate(cv_plot=if_else(is.na(cv_plot),mean(cv_plot,na.rm=TRUE),cv_plot)) |> # compute cv for missing values
+  # compute weighted quantiles of sgdd and wai, and correlation between wai and sgdd
+  mutate(margin.sgdd=case_when(sgdd<weighted.quantile(sgdd,w=BA, prob=0.2)[[1]]~"cold",
+                               sgdd<weighted.quantile(sgdd,w=BA, prob=0.6)[[1]]&
+                                 sgdd>weighted.quantile(sgdd,w=BA, prob=0.4)[[1]]~"midtemp",
+                               sgdd>weighted.quantile(sgdd,w=BA, prob=0.8)[[1]]~"hot"),
+         margin.wai=case_when(wai<weighted.quantile(wai,w=BA, prob=0.2)[[1]]~"arid",
+                              wai<weighted.quantile(wai,w=BA, prob=0.6)[[1]]&
+                                 wai>weighted.quantile(wai,w=BA, prob=0.4)[[1]]~"midhum",
+                               wai>weighted.quantile(wai,w=BA, prob=0.8)[[1]]~"humid"),
+         cor.wai.sgdd=cor(wai,sgdd,use="complete.obs")) |> 
+  mutate(margin.sgdd=factor(margin.sgdd,levels=c("cold","midtemp","hot")),
+         margin.wai=factor(margin.wai,levels=c("arid","midhum","humid"))) |> 
+  filter(!is.na(margin.sgdd)&!is.na(margin.wai)) |>
+  ungroup() |> 
+  mutate(ISP=scale(log(ISP))) |>  
+  group_by(block,margin.sgdd,margin.wai) |> 
+  summarise(n=n()) |>
+  ungroup() |> group_by(block) |>
+  mutate(n=scale(n)) |>
+  ggplot(aes(margin.wai,margin.sgdd,fill=n))+
+  geom_tile()+
+  scale_fill_gradientn(colours = viridis(15))+
+  facet_wrap(~block)
+
+
+
+
+```
+
+
+
 One key point is that correlation between wai/sgdd in species distribution might be different between continent.
 <!-- Weight lacking in computation, but should only be weighted by BA and not cv_plot!! -->
 Sgdd/wai are analysed with correlation with all observation and with observation only in margins.
@@ -467,7 +669,7 @@ Sgdd/wai are analysed with correlation with all observation and with observation
 # investigating ddiference in wai/sgdd correlation between continents
 
 sp.ttest<-sp.dataset |> 
-  select(species,cor.wai.sgdd,block) |> 
+  dplyr::select(species,cor.wai.sgdd,block) |> 
   unique()
 
 # correlation computed on whole dataset
@@ -476,13 +678,15 @@ sp.ttest |>
   geom_density()+
   labs(x="Correlation WAI/SGDD inside species distribution",
        color="Continent",
-       y="")
+       y="")->p
+p
 
+# ggsave("contcor.pdf",plot=p)
 # correlation computed only on margins obs
 sp.dataset |> 
   group_by(species) |> 
   mutate(cor.wai.sgdd=cor(wai,sgdd,use="complete.obs")) |> 
-  select(species,cor.wai.sgdd,block) |> 
+  dplyr::select(species,cor.wai.sgdd,block) |> 
   unique()|> 
   ggplot(aes(cor.wai.sgdd,color=block))+
   geom_density()
@@ -596,7 +800,8 @@ sp.mod=rbind(fecundity.eu_clim |> mutate(block="europe"),
          margin.wai=factor(margin.wai,levels=c("midhum","arid","humid"))) |> 
   filter(!is.na(margin.sgdd)&!is.na(margin.wai)) |>
   ungroup() |> 
-  mutate(ISP=scale(log(ISP)))
+  mutate(ISP=scale(log(ISP))[,]) |> 
+  left_join(phylo.select)
 
 mod.lme = lme(ISP ~ margin.sgdd * margin.wai , 
               random = ~ 1 | species, 
@@ -605,10 +810,9 @@ mod.lme = lme(ISP ~ margin.sgdd * margin.wai ,
 summary(mod.lme)$tTable
 anova(mod.lme)
 
-
 # predictions 
 data.predict=sp.mod |> 
-  select(margin.sgdd,margin.wai) |> 
+  dplyr::select(margin.sgdd,margin.wai) |> 
   unique()
 
 data.predict<-bolker_ci(mod.lme,data.predict)
@@ -626,10 +830,66 @@ data.predict |>
   labs(x="Margin relative to the SGDD gradient",
        y="Predictions",
        color="Margin relative to the WAI gradient")+
-  facet_wrap(~margin.sgdd)
+  facet_wrap(~margin.sgdd)->q
 
+# ggsave("interactionall.pdf",plot=p)
+
+
+sp.mod |> group_by(block,margin.sgdd,margin.wai) |> summarise(n=n())
+
+mod.means=emmeans(object=mod.lme,
+        specs=~margin.wai*margin.sgdd)
+data_pred=cld(object=mod.means,
+    adjust="Tukey",
+    Letters=letters,
+    alpha=0.05)
+as.data.frame(data_pred) |> 
+  mutate(margin.sgdd=if_else(margin.sgdd=="midtemp","Core",
+                            stringr::str_to_title(margin.sgdd)),
+         margin.wai=if_else(margin.wai=="midhum","Core",
+                            stringr::str_to_title(margin.wai))) |> 
+  ggplot(aes(color=margin.wai))+
+  geom_point(aes(margin.wai,emmean))+
+  geom_segment(aes( x = margin.wai,xend=margin.wai,y=lower.CL,yend=upper.CL))+
+  scale_color_manual(values=c("orangered","gold","lightseagreen"))+
+  geom_text(aes(label=str_trim(.group),x=margin.wai,y=upper.CL),vjust=-1,color="black")+
+  labs(x="Margin relative to the SGDD gradient",
+       y="Predictions",
+       color="Margin relative to the WAI gradient")+
+  facet_wrap(~margin.sgdd)->p
+# ggsave("interactionall_tukey.pdf",scale=1.8,width=15,height=8,units="cm",plot=p)
+p
+q
 ```
 
+### Fit in bayesian
+
+```{r}
+sp.bayes=sp.mod |> 
+  sample_frac(0.3)
+X=model.matrix(~margin.sgdd*margin.wai, sp.bayes)
+
+data_list=list(N=dim(sp.bayes)[1],
+               # S=nlevels(as.factor(sp.bayes$species)),
+               # species=as.numeric(as.factor(sp.bayes$species)),
+               NX=ncol(X),
+               ISP=sp.bayes$ISP,
+               X=X)
+               # K_sgdd=nlevels(sp.bayes$margin.sgdd),
+               # K_wai=nlevels(sp.bayes$margin.wai),
+               # sgdd=as.numeric(sp.bayes$margin.sgdd))#,
+               # wai=as.numeric(sp.bayes$margin.wai),
+               # cv_plot=sp.bayes$cv_plot)
+library(rstan)
+fit.lm <- stan(file = "lmm_int.stan",
+                    data=data_list,
+                    iter=1000,
+                    chains=3,
+                    core=3)
+library(shinystan)
+launch_shinystan(fit.lm)
+X
+```
 
 
 ## LMM with interactions between margins, continent effect
@@ -639,13 +899,18 @@ mod.lme = lme(ISP ~ margin.sgdd * margin.wai * block,
               random = ~ 1 | species, 
              weights = varFixed(~cv_plot), 
              data = sp.mod)
+mod.lme.sigma = lme(ISP ~ margin.sgdd * margin.wai * block, 
+              random = ~ 1 | species, 
+             weights = varFixed(~cv_plot), 
+             data = sp.mod,
+             control=lmeControl(sigma = 1))
 summary(mod.lme)$tTable
 anova(mod.lme)
 
 
 # predictions 
 data.predict=sp.mod |> 
-  select(block,margin.sgdd,margin.wai) |> 
+  dplyr::select(block,margin.sgdd,margin.wai) |> 
   unique()
 
 data.predict<-bolker_ci(mod.lme,data.predict)
@@ -663,7 +928,253 @@ data.predict |>
   labs(x="Margin relative to the SGDD gradient",
        y="Predictions",
        color="Continent")+
-  facet_wrap(~margin.sgdd)
+  facet_wrap(~margin.sgdd)->p
+p
+# ggsave("interactioncont.pdf",plot=p)
+
+
+mod.means=emmeans(object=mod.lme,
+        specs=~margin.wai*margin.sgdd,
+        by="block")
+data_pred=cld(object=mod.means,
+    adjust="Tukey",
+    Letters=letters,
+    alpha=0.05)
+contrast(mod.means)
+pairs(mod.means)
+
+
+adjust_width <- -0.05  
+
+data_pred_adj <- as.data.frame(data_pred) %>%
+  mutate(margin.sgdd = if_else(margin.sgdd == "midtemp", "Core", stringr::str_to_title(margin.sgdd)),
+         margin.wai = if_else(margin.wai == "midhum", "Core", stringr::str_to_title(margin.wai)),
+         x_adjusted = as.numeric(as.factor(margin.wai))/6 + if_else(block == "europe", adjust_width, 0))
+
+ggplot(data_pred_adj, aes(color = block)) +
+  geom_point(aes(x_adjusted, emmean)) +
+  geom_segment(aes(x = x_adjusted, xend = x_adjusted, y = lower.CL, yend = upper.CL)) +
+  scale_color_manual(values = c("firebrick3", "cornflowerblue")) +
+  geom_text(aes(label = str_trim(.group), x = x_adjusted, y = emmean), hjust = 1.6,vjust=1) +
+  labs(x = "Margin relative to the SGDD gradient",
+       y = "Predictions",
+       color = "Continent") +
+  scale_x_continuous(breaks = as.numeric(as.factor(unique(data_pred_adj$margin.wai)))/6, 
+                     labels = unique(data_pred_adj$margin.wai))+
+  facet_wrap(~margin.sgdd)+
+  theme(panel.background = element_rect(fill = NA, color = "black"))-> p
+# ggsave(filename="interactioncont_tukey.pdf",scale=1.8,width=15,height=8,units="cm",plot=p)
+
+p
+q
+
+
+```
+
+## control for species proximity
+
+```{r eval=FALSE, include=FALSE}
+phylo.select |> 
+  group_by(genus) |> 
+  summarise(n=length(unique(block))) |> 
+  arrange(desc(n)) |> 
+  filter(n>1) |> 
+  pull(genus)->genus.select
+sp.mod=rbind(fecundity.eu_clim |> mutate(block="europe"),
+                 fecundity.am_clim|> mutate(block="america")) |>
+  left_join(phylo.select) |> 
+  filter(genus %in% genus.select) |> 
+  filter(BA!=0) |> #rm absences
+  # filter(ISP<quantile(ISP,probs=0.97)) |>  # remove extreme values
+  group_by(species) |> 
+  mutate(cv_plot=if_else(is.na(cv_plot),mean(cv_plot,na.rm=TRUE),cv_plot)) |> # compute cv for missing values
+  # compute weighted quantiles of sgdd and wai, and correlation between wai and sgdd
+  mutate(margin.sgdd=case_when(sgdd<weighted.quantile(sgdd,w=BA, prob=0.2)[[1]]~"cold",
+                               sgdd<weighted.quantile(sgdd,w=BA, prob=0.6)[[1]]&
+                                 sgdd>weighted.quantile(sgdd,w=BA, prob=0.4)[[1]]~"midtemp",
+                               sgdd>weighted.quantile(sgdd,w=BA, prob=0.8)[[1]]~"hot"),
+         margin.wai=case_when(wai<weighted.quantile(wai,w=BA, prob=0.2)[[1]]~"arid",
+                              wai<weighted.quantile(wai,w=BA, prob=0.6)[[1]]&
+                                 wai>weighted.quantile(wai,w=BA, prob=0.4)[[1]]~"midhum",
+                               wai>weighted.quantile(wai,w=BA, prob=0.8)[[1]]~"humid"),
+         cor.wai.sgdd=cor(wai,sgdd,use="complete.obs")) |> 
+  mutate(margin.sgdd=factor(margin.sgdd,levels=c("midtemp","cold","hot")),
+         margin.wai=factor(margin.wai,levels=c("midhum","arid","humid"))) |> 
+  filter(!is.na(margin.sgdd)&!is.na(margin.wai)) |>
+  ungroup() |> 
+  mutate(ISP=scale(log(ISP))) 
+
+
+## by genus ## 
+
+# mod.lme = lme(ISP ~ margin.sgdd * margin.wai * block, 
+#               random = ~ 1 | genus/species, 
+#              weights = varFixed(~cv_plot), 
+#              data = sp.mod)
+# summary(mod.lme)$tTable
+# anova(mod.lme)
+
+mod.lmegenus = lme(ISP ~ margin.sgdd * margin.wai * block*genus, 
+              random = ~ 1 | species, 
+             weights = varFixed(~cv_plot), 
+             data = sp.mod)
+summary(mod.lmegenus)$tTable
+anova(mod.lmegenus)
+
+
+mod.means=emmeans(object=mod.lmegenus,
+        specs=~margin.wai*margin.sgdd*block,
+        by=c("genus","margin.sgdd"))
+
+data_pred=cld(object=mod.means,
+    adjust="Tukey",
+    Letters=letters,
+    alpha=0.05)
+contrast(mod.means)
+pairs(mod.means)
+
+
+adjust_width <- -0.05  
+
+data_pred_adj <- as.data.frame(data_pred) %>%
+  mutate(margin.sgdd = if_else(margin.sgdd == "midtemp", "Core", stringr::str_to_title(margin.sgdd)),
+         margin.wai = if_else(margin.wai == "midhum", "Core", stringr::str_to_title(margin.wai)),
+         x_adjusted = as.numeric(as.factor(margin.wai))/6 + if_else(block == "europe", adjust_width, 0))
+
+ggplot(data_pred_adj, aes(color = block)) +
+  geom_point(aes(x_adjusted, emmean)) +
+  geom_segment(aes(x = x_adjusted, xend = x_adjusted, y = lower.CL, yend = upper.CL)) +
+  scale_color_manual(values = c("firebrick3", "cornflowerblue")) +
+  geom_text(aes(label = gsub(" ","",.group), x = x_adjusted, y = emmean+2.5) ) + #y = emmean hjust = 1.4,vjust=1
+  labs(x = "Margin relative to the SGDD gradient",
+       y = "Predictions",
+       color = "Continent") +
+  scale_x_continuous(breaks = as.numeric(as.factor(unique(data_pred_adj$margin.wai)))/6, 
+                     labels = unique(data_pred_adj$margin.wai))+
+  facet_grid(genus~margin.sgdd)+
+  theme(panel.background = element_rect(fill = NA, color = "black"))#-> p
+# ggsave(filename="interactioncont_tukey.pdf",scale=1.8,width=15,height=8,units="cm",plot=p)
+
+
+
+
+## by taxa ##
+mod.lmetaxa = lme(ISP ~ margin.sgdd * margin.wai * block * taxa, 
+              random = ~ 1 | species, 
+             weights = varFixed(~cv_plot), 
+             data = sp.mod)
+anova(mod.lmegenus)
+
+
+mod.means=emmeans(object=mod.lmetaxa,
+        specs=~margin.wai*margin.sgdd,
+        by=c("taxa","block"))
+data_pred=cld(object=mod.means,
+    adjust="Tukey",
+    Letters=letters,
+    alpha=0.05)
+contrast(mod.means)
+pairs(mod.means)
+
+data.predict |> 
+  mutate(margin.sgdd=if_else(margin.sgdd=="midtemp","Core",
+                            stringr::str_to_title(margin.sgdd)),
+         margin.wai=if_else(margin.wai=="midhum","Core",
+                            stringr::str_to_title(margin.wai))) |> 
+  ggplot(aes(color=block))+
+  geom_point(aes(margin.wai,pred))+
+  geom_segment(aes( x = margin.wai,xend=margin.wai,y=ci_l,yend=ci_h))+
+  scale_color_manual(values=c("firebrick3","cornflowerblue"))+
+  labs(x="Margin relative to the SGDD gradient",
+       y="Predictions",
+       color="Continent")+
+  facet_grid(genus~margin.sgdd)
+
+```
+
+
+```{r eval=FALSE, include=FALSE}
+# only account for genus differences
+mod.lme = lme(ISP ~ margin.sgdd * margin.wai * block, 
+              random = ~ 1 | genus, 
+             weights = varFixed(~cv_plot), 
+             data = sp.mod)
+summary(mod.lme)$tTable
+anova(mod.lme)
+
+# predictions 
+data.predict=sp.mod |> 
+  dplyr::select(block,genus,margin.sgdd,margin.wai) |> 
+  unique()
+conf_level = 0.95
+z <- round(qnorm((1-conf_level)/2, lower.tail = FALSE), 2)
+
+data.predict$pred=unname(predict(mod.lme,newdata = data.predict))
+
+boot_fn <- function(data, indices) {
+  boot_data <- data[indices, ]
+  mod_boot <- update(mod.lme, data = boot_data)
+  return(predict(mod_boot, newdata = data.predict, level = 0))
+}
+
+# Perform bootstrap
+boot_results <- boot::boot(data = sp.mod, statistic = boot_fn, R = 1000)
+
+# Compute standard errors of the predictions
+data.predict$pred_se <- apply(boot_results$t, 2, sd)
+data.predict$ci_l <- data.predict$pred - z*data.predict$pred_se
+data.predict$ci_h<- data.predict$pred + z*data.predict$pred_se
+
+data.predict |> 
+  # filter(genus=="Fagus") |>
+  mutate(margin.sgdd=if_else(margin.sgdd=="midtemp","Core",
+                            stringr::str_to_title(margin.sgdd)),
+         margin.wai=if_else(margin.wai=="midhum","Core",
+                            stringr::str_to_title(margin.wai))) |> 
+  ggplot(aes(color=block))+
+  geom_point(aes(margin.wai,pred))+
+  geom_segment(aes( x = margin.wai,xend=margin.wai,y=ci_l,yend=ci_h))+
+  scale_color_manual(values=c("firebrick3","cornflowerblue"))+
+  labs(x="Margin relative to the SGDD gradient",
+       y="Predictions",
+       color="Continent")+
+  facet_grid(genus~margin.sgdd)
+```
+
+
+Test of delineation of climatic groups
+```{r eval=FALSE, include=FALSE}
+classif.sp=df.gbif.short |> dplyr::select(species,clim,opt) |> pivot_wider(names_from = clim,values_from = opt)
+species.acp=rbind(fecundity.eu_clim |> mutate(block="europe"),
+                 fecundity.am_clim|> mutate(block="america")) |>
+  filter(BA!=0) |> #rm absences
+  # filter(ISP<quantile(ISP,probs=0.97)) |>  # remove extreme values
+  group_by(species) |> 
+  mutate(cv_plot=if_else(is.na(cv_plot),mean(cv_plot,na.rm=TRUE),cv_plot)) |> # compute cv for missing values
+  left_join(phylo.select) |> 
+  summarise(mean.slope=median(slope,na.rm=TRUE),
+            mean.wai=mean(wai,na.rm=TRUE)) |> left_join(classif.sp)
+species.acp$categorie <- as.factor(kmeans(species.acp[,2:6],centers=3)$cluster)
+
+acp=FactoMineR::PCA(species.acp[,2:7], quali.sup = 6)
+
+fviz_pca_ind(acp,col.ind = species.acp$categorie)
+# Préparer les données pour ggplot
+ind.coord <- as.data.frame(acp$ind$coord)
+ind.coord$categorie <- df$categorie
+
+# Faire le plot
+ggplot(ind.coord, aes(x = Dim.1, y = Dim.2, color = categorie)) +
+  geom_point(aes(shape = categorie), size = 4) +
+  theme_minimal()
+
+sp.dataset |> 
+  group_by(species) |> 
+  summarise(mean.alt=mean(al) |> 
+  arrange(species,desc(n)) |> 
+  group_by(species) |> 
+  filter(n==max(n)) |> 
+  arrange(ecoReg)
 ```
 
 
@@ -707,7 +1218,7 @@ sp.dataset.lm=rbind(fecundity.eu_clim |> mutate(block="europe"),
 #   scale_x_log10()
 
 summary.mod=sp.dataset.lm |> 
-  select(species,block,mean.wai,mean.sgdd,mean.tmin) |> 
+  dplyr::select(species,block,mean.wai,mean.sgdd,mean.tmin) |> 
   unique() |> 
   mutate(margincold.est=0,
          margincold.sd=0,
@@ -786,7 +1297,7 @@ summary.mod |>
   facet_wrap(~margin)
   
 summary.mod |> 
-  left_join(sp.dataset |> select(species,block,cor.wai.sgdd) |> unique()) |>
+  left_join(sp.dataset |> dplyr::select(species,block,cor.wai.sgdd) |> unique()) |>
   ggplot(aes(margincold.est,marginhot.est,color=block))+
   geom_point()+
   coord_equal() + geom_hline(yintercept = 0) + geom_vline(xintercept = 0)
@@ -795,14 +1306,14 @@ summary.mod |>
   geom_point()+
   coord_equal() + geom_hline(yintercept = 0) + geom_vline(xintercept = 0)
 summary.mod |> 
-  left_join(sp.dataset |> select(species,block) |> unique()) |>
+  left_join(sp.dataset |> dplyr::select(species,block) |> unique()) |>
   ggplot(aes(marginhum.est,margindry.est,color=block))+
   geom_point()+
   coord_equal() + geom_hline(yintercept = 0) + geom_vline(xintercept = 0)
 
 
 summary.mod |> 
-  left_join(sp.dataset |> select(species,block,cor.wai.sgdd) |> unique()) |>
+  left_join(sp.dataset |> dplyr::select(species,block,cor.wai.sgdd) |> unique()) |>
   ggplot(aes(marginhot.est,margincold.est,color=cor.wai.sgdd>0))+
   geom_point()+ geom_hline(yintercept = 0) + geom_vline(xintercept = 0)
 
@@ -814,7 +1325,7 @@ summary.mod |>
               values_from = value) |> 
   mutate(margin.type=case_when(grepl("cold|hot",margin)~"sgdd",
                                TRUE~"wai"))|> 
-  left_join(sp.dataset |> select(species,block,cor.wai.sgdd) |> unique()) |>
+  left_join(sp.dataset |> dplyr::select(species,block,cor.wai.sgdd) |> unique()) |>
   ggplot(aes(cor.wai.sgdd,est,col=block))+
   geom_point()+
   geom_smooth(method="lm",aes(color=NULL))+
@@ -860,12 +1371,12 @@ summary |>
   mutate(species=str_sub(species,8,-1)) |> 
   arrange(species) |> 
   group_by(species) |>
-  select(species,margin,Estimate,`Std. Error`) |> 
+  dplyr::select(species,margin,Estimate,`Std. Error`) |> 
   rename(mean=Estimate,
          sd=`Std. Error`) |> 
   pivot_wider(names_from = margin,
               values_from = c("mean","sd")) |> 
-  left_join(sp.dataset |> select(species,block) |> unique()) |>
+  left_join(sp.dataset |> dplyr::select(species,block) |> unique()) |>
   ggplot(aes(mean_margin.valcold,mean_margin.valhot,col=block))+
   geom_point()+
   geom_errorbarh(aes(xmin=mean_margin.valcold-sd_margin.valcold,
@@ -881,11 +1392,11 @@ summary |>
   mutate(species=str_sub(species,8,-1)) |> 
   arrange(species) |> 
   group_by(species) |>
-  select(species,margin,Estimate,`Std. Error`) |> 
+  dplyr::select(species,margin,Estimate,`Std. Error`) |> 
   rename(mean=Estimate,
          sd=`Std. Error`) |> 
   ungroup() |> 
-  left_join(sp.dataset |> select(species,block) |> unique()) |>
+  left_join(sp.dataset |> dplyr::select(species,block) |> unique()) |>
   mutate(weight=abs(mean/sd)) |> 
   ggplot()+
   # geom_point(aes(margin,mean,color=block))
@@ -949,7 +1460,7 @@ sp.dataset.lm=rbind(fecundity.eu_clim |> mutate(block="europe"),
   as.data.table()
 
 sp.dataset.lm |> 
-  select(species,cor.wai.sgdd,block) |> 
+  dplyr::select(species,cor.wai.sgdd,block) |> 
   unique() |> 
   ggplot(aes(cor.wai.sgdd,
            color=block))+
