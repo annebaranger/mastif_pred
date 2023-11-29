@@ -22,23 +22,32 @@
 #' @param dir.data directory of mastif rdata
 #' @param files.climate list of files of climate variables to extract
 #' "mat","tmin","map"
-get_mastif <- function(dir.data="data/fecundityMastif.rdata",
-                              files.climate=list(mat="data/CHELSA/CHELSA_bio10_1.tif",
-                                                 tmin="data/CHELSA/CHELSA_bio10_6.tif",
-                                                 map="data/CHELSA/CHELSA_bio10_12.tif")){
+get_mastif <- function(dir.data=dir.data,
+                       # c("data/mastif_plots/fittedFecundityMastifNorthAmerica.rdata",
+                       #            "data/mastif_plots/fittedFecundityMastifEurope.rdata"),
+                       files.climate=list(mat="data/CHELSA/CHELSA_bio10_1.tif",
+                                          tmin="data/CHELSA/CHELSA_bio10_6.tif",
+                                          map="data/CHELSA/CHELSA_bio10_12.tif")){
   clim=rast(lapply(names(files.climate),
                    function(z){r=rast(files.climate[[z]])
                                names(r)=z
                                return(r)}
                    )
             )
+  # fecundityPred_i=data.frame()
+  # for (i in 1:length(dir.data)){
+  #   print(i)
+  #   load(dir.data[i])
+  #   fecundityPred_i=bind_rows(fecundityPred_i,
+  #                             fecundityPred)
+  # }
   load(dir.data)
   fecundityPred<-fecundityPred |> 
     tibble::rownames_to_column(var="ID") |> 
     separate(ID,into=c("treeID","year"),sep="_",remove=FALSE) |> 
     separate(treeID,into=c("plotID",NA),sep="-",remove=FALSE)
   
-  fecundityPred<-cbind(fecundityPred,
+   fecundityPred<-cbind(fecundityPred,
                        terra::extract(clim,
                                y=data.frame(x=fecundityPred$lon,
                                             y=fecundityPred$lat))[,-1]
@@ -55,7 +64,7 @@ get_mastif <- function(dir.data="data/fecundityMastif.rdata",
   # build a df with species selection, by restricting only to species with more 
   # than 200 individuals
   df.species <- fecundityPred |> 
-    select(treeID,species,lon,lat) |> 
+    dplyr::select(treeID,species,lon,lat) |> 
     distinct() |> 
     group_by(species) |> 
     filter(n()>200) |> 
@@ -88,7 +97,7 @@ get_specieslist <- function(species.list,block){
     mutate(block=block)
   
   # add phylogeny
-  classification(unique(species.code$TaxonName),db="ncbi")->out # get phylogeny from species names
+  classification(unique(species.code$TaxonName),db="gbif",rows=1)->out # get phylogeny from species names
   class2tree(out,check=FALSE)->out2 # random command
   
   species.phylo <- out2$classification |> # extract phylogeny from taxize object
@@ -99,7 +108,7 @@ get_specieslist <- function(species.list,block){
     # reformat taxa
     mutate(taxa=case_when(class=="Pinopsida"~"gymnosperm",
                           class=="Magnoliopsida"~"angiosperm")) |>
-    select(species_l,genus,family,order,taxa) |> # select relevant fields
+    dplyr::select(species_l,genus,family,order,taxa) |> # select relevant fields
     left_join(species.code[,c("TaxonName","species","block")],by=c("species_l"="TaxonName")) |>
     unique()
   rm(out,out2)
@@ -117,7 +126,8 @@ select_species <- function(mastif.am,
                            mastif.eu,
                            meanClimate_species){
   df.tree=rbind(mastif.am$df.tree,mastif.eu$df.tree) 
-  df.species=rbind(mastif.am$df.species.select,mastif.eu$df.species.select)
+  df.species=rbind(mastif.am$df.species.select |> mutate(block="america"),
+                   mastif.eu$df.species.select|> mutate(block="europe"))
   
   # format gbif output
   df.niche= meanClimate_species |> 
@@ -126,7 +136,7 @@ select_species <- function(mastif.am,
            species=paste0(substr(tolower(genus),1,8),substr(str_to_title(sp),1,8))) |> 
     rename_with(.cols=c("mat","map","tmin"),
                 ~paste0(.x,".opt")) |> 
-    select(-genus,-sp) |> 
+    dplyr::select(-genus,-sp) |> 
     mutate(mat.range=mat.high-mat.low,
            map.range=map.high-map.low,
            tmin.range=tmin.high-tmin.low) |> 
@@ -135,10 +145,10 @@ select_species <- function(mastif.am,
                  values_to = "clim_niche")
   
   df.range<-df.niche |> 
-    select(species,clim,clim_niche) |> 
+    dplyr::select(species,clim,clim_niche) |> 
     filter(grepl("range",clim)) |> 
     separate(clim,into=c("var","drop")) |> 
-    select(-drop) |> 
+    dplyr::select(-drop) |> 
     rename(range="clim_niche")
   
   # compute weight for trees
@@ -165,21 +175,34 @@ select_species <- function(mastif.am,
     group_by(species,clim) |>
     mutate(opt=weighted.quantile(clim_val,1/cv_plot,prob=0.5)[1],
            low=weighted.quantile(clim_val,1/cv_plot,prob=0.025)[1],#,probs=0.1)[1],
-           high=weighted.quantile(clim_val,1/cv_plot,prob=0.975)[1]) |> 
+           high=weighted.quantile(clim_val,1/cv_plot,prob=0.975)[1],
+           rhigh=weighted.quantile(clim_val,1/cv_plot, prob = 1- min(5, n())/n())[1],
+           rlow=weighted.quantile(clim_val,1/cv_plot, prob = min(5, n())/n())[1]) |> 
     ungroup()
   
   df.tree.weight |>
     # format to match df.niche 
-    select(species,clim,opt,low,high) |> unique() |> 
+    dplyr::select(species,clim,low,high) |> unique() |> 
     pivot_wider(names_from = "clim",
-                values_from = c("opt","high","low"),
+                values_from = c("high","low"), #"opt",
                 names_sep = ".") |> 
     pivot_longer(cols=-species,
                  names_to = "clim",
                  values_to = "clim_obs") |> 
-    mutate(clim=paste0(str_split_i(clim,"\\.",2),".",str_split_i(clim,"\\.",1))) -> mastif.range
+    mutate(clim=paste0(str_split_i(clim,"\\.",2),".",str_split_i(clim,"\\.",1))) -> mastif.range.quant
+  
+  df.tree.weight |>
+    # format to match df.niche 
+    dplyr::select(species,clim,rlow,rhigh) |> unique() |> 
+    pivot_wider(names_from = "clim",
+                values_from = c("rhigh","rlow"), #"opt",
+                names_sep = ".") |> 
+    pivot_longer(cols=-species,
+                 names_to = "clim",
+                 values_to = "clim_obs") |> 
+    mutate(clim=paste0(str_split_i(clim,"\\.",2),".",str_split_i(clim,"\\.",1))) -> mastif.range.rank
     #merge with gbif climate
-  (mastif.range |> 
+  (mastif.range.quant |> 
     left_join(df.niche,by=c("species","clim")) |> 
     relocate(species_l,.after=species)|> 
     separate(clim,into=c("var","quant"),remove=FALSE) |> 
@@ -187,21 +210,37 @@ select_species <- function(mastif.am,
   # merge climate range
     left_join(df.range,by=c("species","var")) |> 
     # filter(!is.na(species_l)) |> 
-    mutate(dif=case_when(grepl("opt",clim)~100*abs(clim_obs-clim_niche)/range,
-                         grepl("high",clim)~100*(clim_obs-clim_niche)/range,
+    mutate(dif=case_when(grepl("high",clim)~100*(clim_obs-clim_niche)/range,
                          grepl("low",clim)~100*(clim_niche-clim_obs)/range)) |> 
     filter(dif<(-50)|is.na(dif)) |> # filter out large difference and also
       # species for which there is no data in GBIF
-    select(species) |> unique())$species->sp.deleted
-  sp.select=setdiff(unique(df.tree$species),sp.deleted)
-  sp.select.eu=sp.select[sp.select %in% mastif.eu$df.species.select$species]
-  sp.select.am=sp.select[sp.select %in% mastif.am$df.species.select$species]
+    dplyr::select(species) |> unique())$species->sp.deleted.quant
+  (mastif.range.rank |> 
+      left_join(df.niche,by=c("species","clim")) |> 
+      relocate(species_l,.after=species)|> 
+      separate(clim,into=c("var","quant"),remove=FALSE) |> 
+      relocate(var,.after=species_l) |> 
+      # merge climate range
+      left_join(df.range,by=c("species","var")) |> 
+      # filter(!is.na(species_l)) |> 
+      mutate(dif=case_when(grepl("high",clim)~100*(clim_obs-clim_niche)/range,
+                           grepl("low",clim)~100*(clim_niche-clim_obs)/range)) |> 
+      filter(dif<(-50)|is.na(dif)) |> # filter out large difference and also
+      # species for which there is no data in GBIF
+      dplyr::select(species) |> unique())$species->sp.deleted.rank
+  
+  
+  df.species.select=rbind(mastif.range.quant,
+                          mastif.range.rank) |> 
+    left_join(df.species) |> 
+    pivot_wider(names_from = "clim",
+                values_from = "clim_obs") |> 
+    mutate(select.quant=(!species %in% sp.deleted.quant),
+           select.rank=(!species %in% sp.deleted.rank))
   
   return(list(df.gbif=df.niche,
               df.tree_w=df.tree.weight,
-              mastif.range=mastif.range,
-              sp.select.am=sp.select.am,
-              sp.select.eu=sp.select.eu))
+              df.select=df.species.select))
 }
 
 
@@ -213,11 +252,15 @@ select_species <- function(mastif.am,
 
 #' Get a list of climate files
 #' @param clim_list list of climatic variables of interest
-get_climate<-function(clim_list=list(mat="data/CHELSA/CHELSA_bio10_1.tif",
-                                     tmin="data/CHELSA/CHELSA_bio10_6.tif",
-                                     map="data/CHELSA/CHELSA_bio10_12.tif",
+get_climate<-function(clim_list=list(mat="data/CHELSA/CHELSA_bio1_1981-2010_V.2.1.tif",
+                                     tmin="data/CHELSA/CHELSA_bio6_1981-2010_V.2.1.tif",
+                                     map="data/CHELSA/CHELSA_bio12_1981-2010_V.2.1.tif",
+                                     pmax="data/CHELSA/CHELSA_bio13_1981-2010_V.2.1.tif",
                                      sgdd="data/CHELSA/CHELSA_gdd5_1981-2010_V.2.1.tif",
-                                     pet="data/CHELSA/CHELSA_pet_penman_mean_1981-2010_V.2.1.tif")){
+                                     pet="data/CHELSA/CHELSA_pet_penman_mean_1981-2010_V.2.1.tif",
+                                     cmi_min="data/CHELSA/CHELSA_cmi_min_1981-2010_V.2.1.tif",
+                                     cmi_mean="data/CHELSA/CHELSA_cmi_mean_1981-2010_V.2.1.tif",
+                                     cmi_max="data/CHELSA/CHELSA_cmi_max_1981-2010_V.2.1.tif")){
   return(clim_list)
 }
 
@@ -294,7 +337,7 @@ get_fecundity <- function(continent,
   load(paste0("data/",continent,"/BA.rdata"))
   BA<-as.data.frame(BA)|> 
     rownames_to_column(var="plot") |> 
-    select(plot,matches(sp.select)) |> 
+    dplyr::select(plot,matches(sp.select)) |> 
     pivot_longer(cols=-plot,
                  names_to = "species",
                  values_to = "BA")
@@ -303,7 +346,7 @@ get_fecundity <- function(continent,
   load(paste0("data/",continent,"/ISP.rdata"))
   ISP<-as.data.frame(ISP)|> 
     rownames_to_column(var="plot") |> 
-    select(plot,matches(sp.select)) |> 
+    dplyr::select(plot,matches(sp.select)) |> 
     pivot_longer(cols=-plot,
                  names_to = "species",
                  values_to = "ISP")
@@ -312,14 +355,14 @@ get_fecundity <- function(continent,
   load(paste0("data/",continent,"/fecGmSd.rdata"))
   fecGmSd<-as.data.frame(summary)|> 
     rownames_to_column(var="plot") |> 
-    select(plot,matches(sp.select)) |> 
+    dplyr::select(plot,matches(sp.select)) |> 
     pivot_longer(cols=-plot,
                  names_to = "species",
                  values_to = "fecGmSd")
   load(paste0("data/",continent,"/fecGmMu.rdata"))
   fecGmMu<-as.data.frame(summary)|> 
     rownames_to_column(var="plot") |> 
-    select(plot,matches(sp.select)) |> 
+    dplyr::select(plot,matches(sp.select)) |> 
     pivot_longer(cols=-plot,
                  names_to = "species",
                  values_to = "fecGmMu")
@@ -345,8 +388,25 @@ get_fecundity <- function(continent,
   return(fecundity)
 }
 
+#' Separate american block
+#'@description based on mean longitude and a threshold, it classifies wether a 
+#'species is part of the easter or western species block in N America
+#'@param fecundity.am_clim
+#'@param fecundity.eu_clim
 
-
+class_species <- function(fecundity.am_clim,
+                          fecundity.eu_clim){
+  species_cat=rbind(fecundity.eu_clim |> mutate(block="europe"),
+        fecundity.am_clim|> mutate(block="america")) |>
+    filter(BA!=0) |> #rm absences
+    # filter(ISP<quantile(ISP,probs=0.97)) |>  # remove extreme values
+    group_by(species) |> 
+    summarize(mean_lon=mean(lon)) |> 
+    mutate(zone=case_when(mean_lon > (-10) ~ "europe",
+                          mean_lon<(-97)~"west",
+                          TRUE~"east"))
+  return(species_cat)
+}
 
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 #### Section 3 - Traits compilation ####

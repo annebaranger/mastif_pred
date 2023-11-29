@@ -26,7 +26,7 @@ list(
   
   # Make and send request to download data from GBIF
   tar_target(df.species,get_species(species.am,species.eu)),
-  tar_target(sp_vec, df.species$TaxonName), 
+  tar_target(sp_vec, df.species$species_l), 
   tar_target(gbif_taxon_keys, get_gbif_taxon_keys(sp_vec)), 
   tar_target(data_gbif, get_data_gbif(gbif_taxon_keys, user, pwd, email)),
   

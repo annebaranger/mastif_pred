@@ -15,11 +15,11 @@ tar_option_set(packages = c("stringr","ggplot2","tidyr","dplyr","terra","factoex
 list(
   tar_target(
     mastif.eu,
-    get_mastif(dir.data="data/fittedFecundityMastifEurope.rdata")
+    get_mastif(dir.data="data/mastif_plots/fittedFecundityMastifEurope.rdata")
   ),
   tar_target(
     mastif.am,
-    get_mastif(dir.data="data/fittedFecundityMastifNorthAmerica.rdata")
+    get_mastif(dir.data="data/mastif_plots/fittedFecundityMastifNorthAmerica.rdata")
   ),
   tar_target(
     species.eu,

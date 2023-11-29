@@ -86,7 +86,7 @@ write_on_disk <- function(table.in, file.in){
 #' @return A character vector containing species latin name
 get_species <- function(species.am,species.eu){
   df.species =rbind(species.am,species.eu) |> 
-    select(-Author) |> 
+    # select(-Author) |> 
     distinct()
   
   return(df.species)
@@ -192,7 +192,7 @@ filter_data_gbif <- function(data_gbif,df.species){
   
   # Create a table with coordinates limits for each species
   coord_lim <- data.frame(species = unique(data_gbif$species)) %>%
-    left_join(df.species[,c("TaxonName","block")],by=c("species"="TaxonName")) |> 
+    left_join(df.species[,c("species_l","block")],by=c("species"="species_l")) |> 
     mutate(
       # block = case_when(species %in% c("Pseudotsuga menziesii", "Robinia pseudoacacia") ~ "American native block", 
       #                   species == "Eucalyptus camaldulensis" ~ "Australian native block", 
@@ -347,14 +347,20 @@ extract_climate_for_gbif <- function(chelsa_files, data_gbif){
   # - Finish formatting
   out <- out %>%
     group_by(species) %>%
-    summarize(mat.low = quantile(mat, probs = 0.025, na.rm = TRUE), 
+    summarize(mat.low = quantile(mat, probs = 0.025, na.rm = TRUE),
               mat.high = quantile(mat, probs = 0.975, na.rm = TRUE), 
+              mat.rlow=quantile(mat,probs = min(5, n())/n(),na.rm = TRUE),
+              mat.rhigh=quantile(mat,probs = 1- min(5, n())/n(),na.rm = TRUE),
               mat = mean(mat, na.rm = TRUE), 
               map.low = quantile(map, probs = 0.025, na.rm = TRUE), 
-              map.high = quantile(map, probs = 0.975, na.rm = TRUE), 
+              map.high = quantile(map, probs = 0.975, na.rm = TRUE),
+              map.rlow=quantile(map,probs = min(5, n())/n(),na.rm = TRUE),
+              map.rhigh=quantile(map,probs = 1- min(5, n())/n(),na.rm = TRUE),
               map = mean(map, na.rm = TRUE), 
               tmin.low = quantile(tmin, probs = 0.025, na.rm = TRUE), 
               tmin.high = quantile(tmin, probs = 0.975, na.rm = TRUE), 
+              tmin.rlow=quantile(tmin,probs = min(5, n())/n(),na.rm = TRUE),
+              tmin.rhigh=quantile(tmin,probs = 1- min(5, n())/n(),na.rm = TRUE),
               tmin = mean(tmin, na.rm = TRUE))
   
   return(out)

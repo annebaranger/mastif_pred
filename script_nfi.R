@@ -26,11 +26,13 @@ list(
   ),
   tar_target(
     sp.select.am,
-    species_selection$sp.select.am # extract only selection from am
+    species_selection$df.select[species_selection$df.select$block=="america"&
+                                  species_selection$df.select$select.quant==TRUE,"species"][[1]] # extract only selection from am
   ),
   tar_target(
     sp.select.eu,
-    species_selection$sp.select.eu
+    species_selection$df.select[species_selection$df.select$block=="europe"&
+                                  species_selection$df.select$select.quant==TRUE,"species"][[1]]
   ),
   ## create a dataframe with species selection and phylogeny
   tar_target(
@@ -120,6 +122,11 @@ list(
                               PC1>quant475&PC1<quant525~"opt",
                               PC1>quant95~"up",
                               TRUE~NA))
+  ),
+  tar_target(
+    species_class,
+    class_species(fecundity.am_clim,
+                  fecundity.eu_clim)
   ),
   NULL
 )

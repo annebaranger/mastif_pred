@@ -64,12 +64,99 @@ View(mastifspred_abies |>
 
 ## match per species
 # load data_tree
-# load("data/IFN/data_plots_europe.rdata")
-# load("data/IFN/data_tree_europe.rdata")
+load("data/IFN/data_plots_europe.rdata")
+load("data/IFN/data_tree_europe.rdata")
+tar_load(phylo.select,store="target_nfi")
 
 # load data_plots
 data_tree <- data_tree |> 
-  mutate(treecode=gsub(" ","_",treecode))
+  mutate(treecode=gsub(" ","_",treecode)) |> 
+  left_join(data_plots,by="plotcode")
+
+data_tree |> 
+  filter(is.na(plotcode)) # check if all trees were matched to a plot
+
+# fit growth model
+data_growth<-data_tree |> 
+  filter(species %in% phylo.select$species_l) |> 
+  filter(treestatus==2) |> 
+  mutate(diftime=lubridate::time_length(difftime(time1 = surveydate2,time2=surveydate1,units="days"),"years"),
+         growth=(dbh2-dbh1)/diftime) |> 
+  group_by(species) |> 
+  mutate(growth05=quantile(growth,probs = 0.05)) |> 
+  filter(growth>quantile(growth,probs = 0.05)) |> 
+  mutate(G=log(growth+growth05)) |> 
+  filter(G>-10000) |> 
+  ungroup() 
+
+
+data_tree |> 
+  filter(species %in% phylo.select$species_l) |> 
+  filter(treestatus==2) |> 
+  mutate(diftime=lubridate::time_length(difftime(time1 = surveydate2,time2=surveydate1,units="days"),"years"),
+         growth=(dbh2-dbh1)/diftime) |> 
+  group_by(species) |> 
+  mutate(growth05=quantile(growth,probs = 0.05)) |> ungroup() |> 
+  filter(species=="Abies alba") |>
+  # filter(country=="SI") |> 
+  ggplot(aes(growth))+
+  geom_density() +
+  xlim(-5,5)+
+  geom_vline(aes(xintercept=growth05))
+  
+data_tree |> 
+  filter(species %in% phylo.select$species_l) |> 
+  filter(treestatus==2) |> 
+  mutate(diftime=lubridate::time_length(difftime(time1 = surveydate2,time2=surveydate1,units="days"),"years"),
+         growth=(dbh2-dbh1)/diftime) |> 
+  group_by(species) |> 
+  # filter(country!="SI") |> 
+  summarise(growth05=quantile(growth,probs = 0.1,na.rm = TRUE)) 
+
+
+species.sampling=sample(unique(data_growth$species),10)
+
+data_growth |> 
+  filter(species %in% species.sampling) |> 
+  ggplot(aes(log(growth+growth05),color=species))+
+  geom_density()+
+  theme_minimal()
+
+data_mod<-data_growth |> 
+  filter(species %in% species.sampling) |> 
+  mutate(G=scale(G))
+growth.mod<-lme4::lmer(G ~ species + species:dbh1 + species:log(dbh1) + (1 | country) + (1 | country:plotcode) ,
+                       data = data_mod)
+
+cbind(data_mod,
+      pred=unname(predict(growth.mod,data_mod))) |> 
+  ggplot(aes(G,pred))+
+  geom_point()
+
+
+data_predict<-data_growth |> 
+  select(plotcode,species,country,growth05) |> 
+  mutate(dbh1=250) |> 
+  unique()
+data_predict$G=unname(predict(growth.mod,data_predict))
+
+
+
+
+
+# fit survival model
+data_survival<-data_tree |> 
+  filter(species %in% phylo.select$species_l) |> 
+  filter(treestatus==2) |> 
+  mutate(diftime=lubridate::time_length(difftime(time1 = surveydate2,time2=surveydate1,units="days"),"years"),
+         growth=(dbh2-dbh1)/diftime) |> 
+  group_by(species) |> 
+  mutate(growth05=quantile(growth,probs = 0.05)) |> 
+  filter(growth>quantile(growth,probs = 0.05)) |> 
+  mutate(G=log(growth+growth05)) |> 
+  filter(G>-10000) |> 
+  ungroup()
+
 inventoryAll <- data.frame()
 plots_ifn <- data_plots$plotcode
 for (i in 1:dim(phylo.select.genus)[1]){
