@@ -36,7 +36,17 @@ tar_load(phylo.select,store="target_nfi")
 tar_load(sp.select.eu,store="target_nfi")
 tar_load(sp.select.am,store="target_nfi")
 tar_load(species_class,store="target_nfi")
-phylo.select<-phylo.select |> left_join(species_class)
+phylo.select<-phylo.select |> left_join(species_class) |> 
+  mutate(zone=case_when(species=="abiesCephalon"~"europe",
+                        species=="acerCircinat"~"west",
+                        species=="acerSpicatum"~"east",
+                        species=="amelanchArborea"~"east",
+                        species=="asiminaTriloba"~"east",
+                        species=="cedrusAtlantic"~"europe",
+                        species=="frangulaAlnus"~"europe",
+                        species=="linderaBenzoin"~"east",
+                        TRUE~zone)) 
+  
 
 
 # small format of gbif
@@ -2281,7 +2291,209 @@ sp.bayes |>
   theme(legend.position = "none")
 ```
 
-## LM with interactions between margins and contiuous var
+## LMM with interactions between margins and contiuous var
+
+```{r}
+z="east"
+### data
+sp.ancova=rbind(fecundity.eu_clim |> mutate(block="europe"),
+               fecundity.am_clim|> mutate(block="america")) |>
+  left_join(phylo.select) |> 
+  filter(zone==z) |> 
+  dplyr::select(plot,lon,lat,species,BA,fecGmMu,fecGmSd,sgdd,wai,pet,map,mat,block,zone) |> 
+  filter(BA!=0) |> #rm absences
+  mutate(dh=12*pet-map) |> 
+  # filter(ISP<quantile(ISP,probs=0.97)) |>  # remove extreme values
+  group_by(species) |> 
+  # compute weighted quantiles of sgdd and wai, and correlation between wai and sgdd
+  mutate(margin.temp=case_when(mat<=weighted.quantile(mat,w=BA, prob=0.1)[[1]]~"cold",
+                               mat<weighted.quantile(mat,w=BA, prob=0.6)[[1]]&
+                                 mat>weighted.quantile(mat,w=BA, prob=0.4)[[1]]~"midtemp",
+                               mat>=weighted.quantile(mat,w=BA, prob=0.9)[[1]]~"hot"),
+         margin.deficit=case_when(dh<=weighted.quantile(dh,w=BA, prob=0.1)[[1]]~"humid",
+                              dh<weighted.quantile(dh,w=BA, prob=0.6)[[1]]&
+                                 dh>weighted.quantile(dh,w=BA, prob=0.4)[[1]]~"midhum",
+                               dh>=weighted.quantile(dh,w=BA, prob=0.9)[[1]]~"arid")) |>
+  mutate(margin.temp=factor(margin.temp,levels=c("midtemp","cold","hot")),
+         margin.deficit=factor(margin.deficit,levels=c("midhum","arid","humid"))) |> 
+  # filter(!is.na(margin.temp)&!is.na(margin.deficit)) |>
+  ungroup() |> 
+  mutate(ISP=fecGmMu/BA,
+         s_ISP=fecGmSd/(BA^2))
+
+sp.zone=sp.ancova |> 
+  filter(zone==z)
+
+mid_isp<-sp.zone |> 
+    group_by(species,margin.temp,margin.deficit) |> 
+    summarise(mid_isp=median(ISP)[[1]]) |> 
+    filter(margin.temp=="midtemp"&margin.deficit=="midhum") |>
+    ungroup() |> 
+    dplyr::select(species,mid_isp)
+
+sp.zone=sp.zone |>
+  left_join(mid_isp) |>
+  mutate(dISP=ISP/mid_isp,
+         s_ISP=s_ISP/(mid_isp^2))
+```
+
+
+```{r}
+### prelim figure
+sp.zone |> 
+  filter(!is.na(margin.deficit)) |> 
+  ggplot(aes(mat,log(dISP),color=margin.deficit))+
+  geom_point(aes(mat,log(dISP),color=margin.deficit))+
+  geom_boxplot(aes(mat,y=-10,color=margin.deficit),position=position_dodge(width=5),outlier.colour = NA)+
+  geom_smooth()+
+  facet_wrap(~species)->plot
+sp.zone |> 
+  filter(!is.na(margin.temp)) |> 
+  ggplot(aes(dh,log(ISP),color=margin.temp))+
+  geom_point()+
+  geom_smooth()+
+  facet_wrap(~species)->plot
+
+sp.mod=sp.zone |> 
+  filter(!is.na(margin.temp)) |> 
+  mutate(dh2=scale(dh^2),
+         dh=scale(dh))
+deficit.ancova=lme(log(ISP)~margin.temp*dh+margin.temp*dh2,
+                   random=~1|species,
+                   data=sp.mod)
+summary(deficit.ancova)
+
+```
+
+
+```{r}
+
+###data
+sp.mod=sp.zone |> 
+  filter(!is.na(margin.temp)) |> 
+  filter(!is.na(ISP)) |> 
+  filter(dh>quantile(dh,probs = 0.01,na.rm=TRUE)) |> filter(dh<quantile(dh,probs=0.99,na.rm=TRUE)) |> 
+  mutate(dh_old=dh) |> 
+  group_by(species,margin.temp) |> 
+  mutate(dh=scale(dh),
+         dh2=dh^2) |> 
+  filter(!is.na(dh))
+
+### check species overlap
+sp.mod |> 
+  group_by(species) |> 
+  mutate(dh.cat=cut(dh_old,breaks = seq(min(dh_old),max(dh_old),by=100)),
+         cormatdh=cor(mat,dh_old,use="complete")) |>
+  group_by(species,cormatdh,margin.temp,dh.cat) |> 
+  summarise(n=n()) |> 
+  filter(margin.temp!="midtemp") |> 
+  pivot_wider(names_from = margin.temp,
+              values_from = n) |> 
+  filter(!is.na(dh.cat)) |> 
+  mutate(across(c("cold","hot"),
+                ~replace_na(.,0))) |> 
+  mutate(d=abs(cold-hot)/(hot+cold)) |> 
+  summarise(n=mean(d)) |> arrange(n) |> 
+  filter(n>0.7) |> pull(species)->speciescor
+
+sp.mod |> 
+  filter(species %in% speciescor) |>
+  filter(margin.temp!="midtemp") |> 
+  ggplot(aes(dh_old,log(ISP),color=margin.temp))+
+  geom_point(alpha=0.4)+
+  geom_boxplot(aes(dh_old,0,color=margin.temp),outlier.colour = NA)+
+  geom_smooth()+
+  scale_color_manual(values=c("steelblue1","firebrick1"))+
+  facet_wrap(~species)
+### mod fit
+sp.mod=sp.mod |> 
+  filter(!species %in% speciescor)
+
+X=model.matrix(~margin.temp*dh+margin.temp*dh2, sp.mod)
+
+data_zone=list(N=dim(sp.mod)[1],
+                 NX=ncol(X),
+                 S=nlevels(as.factor(sp.mod$species)),
+                 species=as.numeric(as.factor(sp.mod$species)),
+                 ISP=sp.mod$ISP,
+                 X=X,
+                 NULL)
+fit.zone.2 <- stan(file = "lmm_ancova.stan",
+                 data=data_zone,
+                 iter=1000,
+                 chains=3,
+                 core=3,
+                 include=FALSE,
+                 pars=c("beta_raw"))
+
+
+posteriors_fec<-as.data.frame(fit.zone.2) |>
+  dplyr::select(!matches("beta_")) |>
+  dplyr::select(matches("beta"))
+colnames(posteriors_fec)[1:ncol(X)]=colnames(X)
+speciescode=sp.mod |> ungroup()|> dplyr::select(species) |> mutate(code=as.numeric(as.factor(species))) |> unique()
+speciesranef=as.data.frame(summary(fit.zone.2)$summary) |> 
+  rownames_to_column(var="parameter") |> 
+  filter(grepl("alpha",parameter)) |> 
+  dplyr::select(parameter,mean) |> 
+  mutate(code=as.numeric(gsub(".*?\\[([^]]*)\\].*", "\\1", parameter))) |> 
+  left_join(speciescode) |> 
+  dplyr::select(species,mean)
+
+# contrast_cor=as.data.frame(X) |>
+#     unique() |>
+#     mutate(margin.temp=case_when(margin.tempcold==1~"cold",
+#                                  margin.temphot==1~"hot",
+#                                  TRUE~"midtemp"),
+#            margin.deficit=case_when(margin.deficithumid==1~"humid",
+#                                  margin.deficitarid==1~"arid",
+#                                  TRUE~"midhum"),
+#            zone=z) |> 
+#     mutate(margin.temp=factor(margin.temp,levels=c("cold","midtemp","hot")),
+#            margin.deficit=factor(margin.deficit,levels=c("arid","midhum","humid"))) |> 
+#     tibble::rownames_to_column(var = "code") |> 
+#     dplyr::select(code,margin.temp,margin.deficit,zone) |> 
+#     mutate(contrast=paste0(margin.temp,"_",margin.deficit))
+contrast_mat= X |>  t()
+contrast_post=as.matrix(posteriors_fec)[,1:ncol(X)] %*% contrast_mat
+fit=apply(contrast_post,2,median)
+quant05=apply(contrast_post,2,quantile,probs=0.05)
+quant95=apply(contrast_post,2,quantile,probs=0.95)
+cbind(sp.mod,
+      fit=fit,
+      quant05=quant05,
+      quant95=quant95) |>
+  left_join(speciesranef) |> 
+  ggplot()+
+  geom_line(aes(dh,fit,color=margin.temp),size=0.6)+
+  # geom_point(aes(dh,log(ISP)-mean,color=margin.temp),size=0.6,alpha=0.6)+
+  geom_ribbon(aes(x=dh,ymin=quant05,ymax=quant95,fill=margin.temp),alpha=0.8)+
+  scale_fill_manual(values=c("bisque2","steelblue1","firebrick1"))+
+  scale_color_manual(values=c("bisque2","steelblue1","firebrick1"))
+cbind(sp.mod,
+      fit=fit,
+      quant05=quant05,
+      quant95=quant95) |>
+  left_join(speciesranef) |> 
+  ggplot()+
+  geom_line(aes(dh_old,fit,color=margin.temp),size=0.6)+
+  geom_point(aes(dh_old,log(ISP)-mean,color=margin.temp),size=0.6,alpha=0.6)+
+  geom_ribbon(aes(x=dh_old,ymin=quant05,ymax=quant95,fill=margin.temp),alpha=0.8)+
+  scale_fill_manual(values=c("bisque2","steelblue1","firebrick1"))+
+  scale_color_manual(values=c("bisque2","steelblue1","firebrick1"))+
+  facet_wrap(~species)
+
+
+sp.mod |> 
+  # group_by(species,margin.temp,margin.deficit) |> 
+  # summarise(n=n()) |> 
+  # ungroup() |> 
+  ggplot(aes(margin.temp,fill=species))+
+  geom_histogram(stat = "count")+
+  facet_wrap(~margin.temp)+
+  scale_fill_manual(values=viridis(n=13))
+```
+
 ## LMM with interactions between margins, continent effect
 
 ```{r lmmInteractionsCont}
