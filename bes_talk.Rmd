@@ -1,0 +1,1734 @@
+---
+title: "Bristish Ecological Society - presentation"
+author: "Anne Baranger"
+date: "2023-12-02"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE,message=FALSE)
+library(targets)
+lapply(c("stringr","tidyr","dplyr","tibble", # data analysis
+         "ggplot2","viridis", # plot
+         "factoextra", "nlme","modi","rstan","shinystan",# stat & models
+         "rworldmap" # geographic data #terre, sf
+         ),require,character.only=TRUE)
+theme_set(theme_minimal()) # ggplot theme
+
+
+# load necessary data #
+
+## mastif data ##
+# tar_load(mastif.eu,store="target_data")
+# tar_load(mastif.am,store="target_data")
+
+## gbif data ##
+#tar_load(meanClimate_species,store="target_gbif")
+
+
+## results from selection ##
+# to be nuanced 
+tar_load(species_selection,store="target_nfi")
+
+## species selection ##
+tar_load(phylo.select,store="target_nfi")
+
+tar_load(sp.select.eu,store="target_nfi")
+tar_load(sp.select.am,store="target_nfi")
+tar_load(species_class,store="target_nfi")
+phylo.select<-phylo.select |> left_join(species_class) |> 
+  mutate(zone=case_when(species=="abiesCephalon"~"europe",
+                        species=="acerCircinat"~"west",
+                        species=="acerSpicatum"~"east",
+                        species=="amelanchArborea"~"east",
+                        species=="asiminaTriloba"~"east",
+                        species=="cedrusAtlantic"~"europe",
+                        species=="frangulaAlnus"~"europe",
+                        species=="linderaBenzoin"~"east",
+                        TRUE~zone)) 
+  
+
+
+# small format of gbif
+df.gbif.short <- species_selection$df.gbif |>
+  separate(clim,into = c("clim","range")) |> 
+  pivot_wider(names_from = range,
+                values_from = clim_niche)
+
+#compute climate range
+# df.range<-species_selection$df.gbif |> 
+#     dplyr::select(species,clim,clim_niche) |> 
+#     filter(grepl("range",clim)) |> 
+#     separate(clim,into=c("var","drop")) |> 
+#     dplyr::select(-drop) |> 
+#     rename(range="clim_niche")
+
+## fecundity data ##
+tar_load(fecundity.eu_clim,store="target_nfi")
+tar_load(fecundity.am_clim,store="target_nfi")
+
+worldmap <- sf::st_as_sf(getMap(resolution = "high"))
+```
+
+# Introduction 
+
+## Map of MASTIF data
+```{r}
+p<-rbind(readRDS("target_data/objects/mastif.am")$df.tree,
+      readRDS("target_data/objects/mastif.eu")$df.tree) |> 
+  filter(species %in% c(sp.select.am,sp.select.eu)) |> 
+  select(species,lon,lat) |> 
+  distinct() |> 
+  ggplot() +
+  geom_sf(data=worldmap,fill=NA) +
+  geom_jitter(aes(x=lon,y=lat,color=species),size=1.3,alpha=0.5)+
+  theme_minimal()+
+  xlim(-135,24) + 
+  ylim(27,73)+
+  theme(axis.title = element_blank(),
+        axis.text = element_blank(),
+        legend.position = "none")+
+  labs(color="Species")+
+  ggtitle(label="Maps of MASTIF observations network for 85 species")
+ggsave( p,
+        filename = "bes_fig/MastifPlot.png",
+        dpi = 600,
+        width = 15,
+        height=9,
+        units = "cm")
+```
+
+## Species selection
+```{r}
+species_selection$df.gbif |> 
+  # filter(species %in% sp.select.am) |> 
+  filter(grepl("mat",clim)) |> 
+  pivot_wider(names_from = clim,
+              values_from = clim_niche) |> 
+  rename(quant=mat.low,rank=mat.rlow) |> 
+  pivot_longer(cols=c("quant","rank"),
+               names_to = "low_type",
+               values_to = "low") |> 
+  rename(quant=mat.high,rank=mat.rhigh) |> 
+  pivot_longer(cols=c("quant","rank"),
+               names_to = "high_type",
+               values_to = "high") |> 
+  filter(low_type==high_type) |> 
+  mutate(source="gbif") |> 
+  select(-species_l)->gbif.sp
+gbif.sp |> select(species,mat.opt,mat.range)
+
+species_selection$df.select |> 
+  # filter(species %in% sp.select.am) |> 
+  select(species,matches("mat")) |> 
+  rename(quant=mat.low,rank=mat.rlow) |> 
+  pivot_longer(cols=c("quant","rank"),
+               names_to = "low_type",
+               values_to = "low") |> 
+  rename(quant=mat.high,rank=mat.rhigh) |> 
+  pivot_longer(cols=c("quant","rank"),
+               names_to = "high_type",
+               values_to = "high") |> 
+  filter(low_type==high_type) |> 
+  mutate(source="mastif")->mastif.sp
+
+df.plot=rbind(mastif.sp,
+      gbif.sp |> select(-mat.opt,-mat.range)) |> 
+  # filter(species %in% sample(unique(species_selection$df.gbif$species),15)) |> 
+  left_join(gbif.sp |> select(species,mat.opt) |> unique()) |> arrange(species) |> 
+  left_join(species_selection$df.select |> select(species,select.quant,select.rank)) |> 
+  filter(!is.na(mat.opt)) |> 
+  # rename(quant=select.quant,rank=select.rank) |>
+  # pivot_longer(cols=c("quant","rank"),
+  #              names_to = "select_type",
+  #              values_to = "select") |>
+  # filter(select_type==high_type) |>
+  mutate(species=forcats::fct_reorder(species,mat.opt)) 
+p<-df.plot |> 
+  filter(species %in% sample(unique(df.plot$species),25)) |> 
+  filter(!species %in% c("sorbusAmerican","corylusCornuta","acerSpicatum")) |> 
+  filter(high_type=="quant") |> 
+  mutate(select.quant=if_else(select.quant==TRUE,"Selected","Not selected")) |> 
+  ggplot(aes(x=(low+high)/2,y=species))+
+  geom_pointrange(aes(xmin=low,xmax=high,color=source),position=position_dodge(width = 0.5))+
+  facet_wrap(~select.quant,scales = "free_y")+
+  scale_color_manual(values=c("grey","black"))+
+  labs(color="Source",
+       x="Temperature range")
+p
+ggsave( p,
+        filename = "bes_fig/SpeciesSelect.png",
+        dpi = 600,
+        width = 15,
+        height=9,
+        units = "cm")
+```
+
+## Map of NFI plots
+
+```{r plots10}
+# plots of selected species
+rbind(fecundity.eu_clim |> mutate(block="europe"),
+                 fecundity.am_clim|> mutate(block="america")) |>
+  mutate(dh=12*pet-map) |> 
+  filter(BA!=0) |> 
+  dplyr::select(plot,lat,lon,dh,mat) |> 
+  unique() |> 
+  sample_frac(0.1) |> 
+  ggplot() +
+  geom_sf(data=worldmap,fill=NA) +
+  geom_point(aes(x=lon,y=lat,color=mat))+
+  scale_color_gradient2( low = "steelblue1",mid="bisque", high = "firebrick1")+
+  xlim(-135,24) + 
+  ylim(27,73)+
+  theme_minimal()+
+  theme(axis.title = element_blank(),
+        axis.text = element_blank(),
+        legend.position = "bottom")+
+  ggtitle("10 % of NFI plots")
+
+rbind(fecundity.eu_clim |> mutate(block="europe"),
+                 fecundity.am_clim|> mutate(block="america")) |>
+  mutate(dh=12*pet-map) |> 
+  filter(BA!=0) |> 
+  filter(dh>=(-2000)) |> 
+  dplyr::select(plot,lat,lon,dh,mat) |> 
+  unique() |> 
+  sample_frac(0.1) |> 
+  ggplot() +
+  geom_sf(data=worldmap,fill=NA) +
+  geom_point(aes(x=lon,y=lat,color=dh),size=0.4)+
+  scale_color_gradient2( low = "steelblue1",mid="bisque", high = "firebrick1",breaks=c(-1000,0,1000))+
+  xlim(-135,24) + 
+  ylim(27,73)+
+  theme_minimal()+
+  theme(axis.title = element_blank(),
+        axis.text = element_blank(),
+        legend.position = "bottom")+
+  ggtitle("10 % of NFI plots")
+p<-rbind(fecundity.eu_clim |> mutate(block="europe"),
+                 fecundity.am_clim|> mutate(block="america")) |>
+  mutate(dh=12*pet-map) |> 
+  filter(BA!=0) |> 
+  filter(dh>=(-2000)) |> 
+  dplyr::select(plot,lat,lon,dh,mat) |> 
+  unique() |> 
+  # sample_frac(0.1) |> 
+  ggplot() +
+  geom_sf(data=worldmap,fill=NA) +
+  geom_hex(aes(x=lon,y=lat),bins=80)+
+  xlim(-135,24) + 
+  ylim(27,73)+
+  theme_minimal()+
+  theme(axis.title = element_blank(),
+        axis.text = element_blank(),
+        legend.position = "bottom")+
+  ggtitle("10 % of NFI plots")+
+  scale_fill_continuous(type="viridis",trans="sqrt",breaks=c(1,100,1000,5000))
+# 
+# ggsave( p,
+#         filename = "bes_fig/NFIPlot.png",
+#         dpi = 600,
+#         width = 15,
+#         height=9,
+#         units = "cm")
+
+
+p<-rbind(fecundity.eu_clim |> mutate(block="europe"),
+      fecundity.am_clim|> mutate(block="america")) |>
+  mutate(dh=12*pet-map) |> 
+  filter(BA!=0) |> 
+  filter(dh>=(-2000)) |> 
+  dplyr::select(species,lat,lon,dh,mat) |> 
+  unique() |>
+  left_join(phylo.select) |> 
+  mutate(zone=factor(zone,levels=c("west","east","europe"))) |> 
+  sample_frac(0.1) |>
+  ggplot() +
+  geom_sf(data=worldmap,fill=NA) +
+  geom_point(aes(x=lon,y=lat,color=zone))+#,bins=80
+  xlim(-135,24) + 
+  ylim(27,73)+
+  theme_minimal()+
+  theme(axis.title = element_blank(),
+        axis.text = element_blank(),
+        legend.position = "bottom")+
+  ggtitle("10 % of NFI plots")+
+  scale_fill_continuous(type="viridis",trans="sqrt",breaks=c(1,100,1000,5000))+
+  scale_color_manual(values=c("firebrick4","firebrick1","slateblue"))+
+  labs(color="Biogeographical zone")
+ggsave( p,
+        filename = "bes_fig/BiogeoPlot.png",
+        dpi = 600,
+        width = 15,
+        height=9,
+        units = "cm")
+```
+
+
+```{r mapspw}
+rbind(fecundity.eu_clim |> mutate(block="europe"),
+                 fecundity.am_clim|> mutate(block="america")) |>
+  mutate(dh=12*pet-map) |> 
+  filter(BA!=0) |> 
+  filter(dh>=(-2000)) |> 
+  left_join(phylo.select) |> 
+  filter(zone=="west") |> 
+  sample_frac(0.1) |> 
+  ggplot() +
+  geom_sf(data=worldmap,fill=NA) +
+  geom_point(aes(x=lon,y=lat,color=species),size=0.4)+
+  xlim(-135,-90) + 
+  ylim(27,73)+
+  theme_minimal()+
+  stat_ellipse(aes(x=lon,y=lat,color=species))
+  theme(axis.title = element_blank(),
+        axis.text = element_blank(),
+        legend.position = "bottom")+
+  ggtitle("10 % of NFI plots")
+  
+ 
+```
+
+
+## Geographical zone
+
+
+# Does temperature limit the fecundity in species' margins?
+
+## Map of margins and fecundity boxplot for 3 european species
+```{r}
+species.sub<-rbind(fecundity.eu_clim |> mutate(block="europe"),
+                   fecundity.am_clim|> mutate(block="america")) |>
+  mutate(dh=12*pet-map) |> 
+  filter(BA!=0) |> 
+  filter(species %in% c("piceaAbies","fagusSylvatic","quercusIlex")) |> 
+  group_by(species) |> 
+  # compute weighted quantiles of sgdd and wai, and correlation between wai and sgdd
+  mutate(margin.temp=case_when(mat<weighted.quantile(mat,w=BA, prob=0.1)[[1]]~"Cold",
+                               mat<weighted.quantile(mat,w=BA, prob=0.6)[[1]]&
+                                 mat>weighted.quantile(mat,w=BA, prob=0.4)[[1]]~"Mid",
+                               mat>weighted.quantile(mat,w=BA, prob=0.9)[[1]]~"Hot")#,
+         # margin.deficit=case_when(dh>weighted.quantile(dh,w=BA, prob=0.1)[[1]]~"arid",
+         #                      dh<weighted.quantile(dh,w=BA, prob=0.6)[[1]]&
+         #                         dh>weighted.quantile(dh,w=BA, prob=0.4)[[1]]~"midhum",
+         #                       dh<weighted.quantile(dh,w=BA, prob=0.9)[[1]]~"humid")
+         ) |>
+  mutate(margin.temp=factor(margin.temp,levels=c("Cold","Mid","Hot")),
+         species=factor(species,levels=c("piceaAbies","fagusSylvatic","quercusIlex"))
+         # margin.deficit=factor(margin.deficit,levels=c("arid","midhum","humid"))
+         ) |> 
+  filter(!is.na(margin.temp)) |> #&!is.na(margin.deficit)
+  ungroup() 
+
+map<-species.sub |> 
+  ggplot()+
+  geom_point(aes(x=lon,y=lat,color=margin.temp))+
+  geom_sf(data=worldmap,fill=NA)+
+  xlim(c(-10,35))+
+  ylim(c(35,70))+
+  facet_wrap(~species)+
+  labs(color="Temperature margin:")+
+  scale_color_manual(values=c("steelblue1","bisque2","firebrick1"))+
+  theme(axis.title = element_blank(),
+        legend.position = "top")
+
+box<-species.sub |> 
+  ggplot(aes(margin.temp,log(ISP),fill=margin.temp))+
+  geom_boxplot(outlier.colour = NA)+
+  scale_fill_manual(values=c("steelblue1","bisque2","firebrick1"))+
+  facet_wrap(~species)+
+  theme(legend.position = "none")+
+  labs(y="Fecundity (log)",
+       x="")
+cowplot::plot_grid(map,box,nrow=2 )
+ggsave( map,
+        filename = "bes_fig/MapMargins.png",
+        dpi = 600,
+        width = 15.5,
+        height=10,
+        units = "cm")
+```
+- mettre une carte de l'am du n pour faire plaisir a g
+
+## Analysis per continent
+
+```{r}
+rm(map,box,species.sub)
+
+sp.bayes=rbind(fecundity.eu_clim |> mutate(block="europe"),
+                 fecundity.am_clim|> mutate(block="america")) |>
+  left_join(phylo.select) |> 
+  filter(BA!=0) |> #rm absences
+  mutate(dh=12*pet-map) |> 
+  group_by(species) |> 
+  dplyr::select(plot,lon,lat,species,BA,fecGmMu,fecGmSd,dh,mat,block,zone) |> 
+  mutate(margin.temp=case_when(mat<weighted.quantile(mat,w=BA, prob=0.1)[[1]]~"cold",
+                               mat<weighted.quantile(mat,w=BA, prob=0.55)[[1]]&
+                                 mat>weighted.quantile(mat,w=BA, prob=0.45)[[1]]~"midtemp",
+                               mat>weighted.quantile(mat,w=BA, prob=0.9)[[1]]~"hot"),
+         margin.deficit=case_when(dh<weighted.quantile(dh,w=BA, prob=0.1)[[1]]~"humid",
+                              dh<weighted.quantile(dh,w=BA, prob=0.55)[[1]]&
+                                 dh>weighted.quantile(dh,w=BA, prob=0.45)[[1]]~"midhum",
+                               dh>weighted.quantile(dh,w=BA, prob=0.9)[[1]]~"arid")) |> 
+  mutate(margin.temp=factor(margin.temp,levels=c("midtemp","cold","hot")),
+         margin.deficit=factor(margin.deficit,levels=c("midhum","arid","humid"))) |> 
+  filter(!is.na(margin.temp)) |>
+  ungroup() |> 
+  mutate(ISP=fecGmMu/BA,
+         s_ISP=fecGmSd/(BA^2))
+  # filter(species %in% select.species[3])
+
+# mid_isp<-sp.bayes |> 
+#     group_by(species,margin.temp) |> 
+#     summarise(mid_isp=median(ISP)[[1]]) |> 
+#     filter(margin.temp=="midtemp") |>
+#     ungroup() |> 
+#     dplyr::select(species,mid_isp)
+mid_isp<-sp.bayes |> 
+    group_by(species) |> 
+    summarise(mid_isp=median(ISP)[[1]]) |> 
+    ungroup() |> 
+    dplyr::select(species,mid_isp)
+sp.bayes<-sp.bayes |>
+  left_join(mid_isp) |>
+  mutate(dISP=ISP/mid_isp,
+         s_ISP=s_ISP/(mid_isp^2)) |> 
+  filter(!is.na(dISP))
+
+X=model.matrix(~margin.temp*zone, sp.bayes)
+
+if(file.exists("fit.allsp.margintemp.9par.RData")){
+  load("fit.allsp.margintemp.9par.RData")
+}else{
+  data_list=list(N=dim(sp.bayes)[1],
+               NX=ncol(X),
+               S=nlevels(as.factor(sp.bayes$species)),
+               species=as.numeric(as.factor(sp.bayes$species)),
+               ISP=sp.bayes$dISP,
+               X=X)
+               
+  fit.lm <- stan(file = "lmm_dif.stan",
+                    data=data_list,
+                    iter=1000,
+                    chains=3,
+                    core=3)
+  save(fit.lm,file="fit.allsp.margintemp.9par.RData")
+
+}
+
+# launch_shinystan(fit.lm)
+posteriors_fec<-as.data.frame(fit.lm) |> 
+  dplyr::select(!matches("beta_")) |> 
+  dplyr::select(matches("beta"))
+colnames(posteriors_fec)[1:ncol(X)]=colnames(X)
+
+
+# contrast.max=
+contrast_cor=as.data.frame(X) |> 
+  unique() |>
+  mutate(margin.temp=case_when(margin.tempcold==1~"cold",
+                               margin.temphot==1~"hot",
+                               TRUE~"mid"),
+         zone=case_when(zoneeurope==1~"europe",
+                        zonewest==1~"west",
+                        TRUE~"east")) |> 
+  mutate(margin.temp=factor(margin.temp,levels=c("cold","mid","hot"))) |> 
+  tibble::rownames_to_column(var = "code") |> 
+  dplyr::select(code,margin.temp,zone) |> 
+  mutate(contrast=paste0(margin.temp,"_",zone))
+
+contrast_mat= X |> unique() |>  t()
+contrast_post=as.matrix(posteriors_fec)[,1:ncol(X)] %*% contrast_mat
+
+as.data.frame(contrast_post) |> 
+  pivot_longer(cols=everything(),
+               names_to = "code") |>
+  left_join(contrast_cor,by="code") |> 
+  mutate(zone=factor(zone,levels=c("west","east","europe"))) |> 
+  ggplot(aes(margin.temp,value,color=zone))+
+  geom_boxplot(outlier.colour = NA)+
+  scale_color_manual(values=c("firebrick4","firebrick1","slateblue"))+
+  theme(axis.title=element_blank(),
+        legend.position = "bottom")+
+  geom_hline(yintercept = 0,color="gray12",type="dashed")+
+  labs(title="Log ratio of fecundity relative to \nthe mean fecundity of the niche",
+       color="Geographical \nzone:")-> p
+
+p
+ggsave( p,
+        filename = "bes_fig/MarginTempCont.png",
+        dpi = 600,
+        width = 18,
+        height=14,
+        units = "cm")
+```
+
+## Analysis per continent & taxa
+
+```{r conttaxa}
+sp.bayes=rbind(fecundity.eu_clim |> mutate(block="europe"),
+                 fecundity.am_clim|> mutate(block="america")) |>
+  left_join(phylo.select) |> 
+  filter(BA!=0) |> #rm absences
+  mutate(dh=12*pet-map) |> 
+  group_by(species) |> 
+  dplyr::select(plot,lon,lat,species,taxa,BA,fecGmMu,fecGmSd,dh,mat,block,zone) |> 
+  mutate(margin.temp=case_when(mat<weighted.quantile(mat,w=BA, prob=0.1)[[1]]~"cold",
+                               mat<weighted.quantile(mat,w=BA, prob=0.55)[[1]]&
+                                 mat>weighted.quantile(mat,w=BA, prob=0.45)[[1]]~"midtemp",
+                               mat>weighted.quantile(mat,w=BA, prob=0.9)[[1]]~"hot"),
+         margin.deficit=case_when(dh<weighted.quantile(dh,w=BA, prob=0.1)[[1]]~"humid",
+                              dh<weighted.quantile(dh,w=BA, prob=0.55)[[1]]&
+                                 dh>weighted.quantile(dh,w=BA, prob=0.45)[[1]]~"midhum",
+                               dh>weighted.quantile(dh,w=BA, prob=0.9)[[1]]~"arid")) |> 
+  mutate(margin.temp=factor(margin.temp,levels=c("midtemp","cold","hot")),
+         margin.deficit=factor(margin.deficit,levels=c("midhum","arid","humid"))) |> 
+  filter(!is.na(margin.temp)) |>
+  ungroup() |> 
+  mutate(ISP=fecGmMu/BA,
+         s_ISP=fecGmSd/(BA^2))
+  # filter(species %in% select.species[3])
+
+# mid_isp<-sp.bayes |> 
+#     group_by(species,margin.temp) |> 
+#     summarise(mid_isp=median(ISP)[[1]]) |> 
+#     filter(margin.temp=="midtemp") |>
+#     ungroup() |> 
+#     dplyr::select(species,mid_isp)
+mid_isp<-sp.bayes |> 
+    group_by(species) |> 
+    summarise(mid_isp=median(ISP)[[1]]) |> 
+    ungroup() |> 
+    dplyr::select(species,mid_isp)
+sp.bayes<-sp.bayes |>
+  left_join(mid_isp) |>
+  mutate(dISP=ISP/mid_isp,
+         s_ISP=s_ISP/(mid_isp^2)) |> 
+  filter(!is.na(dISP))
+
+## angios
+sp.taxa=sp.bayes |> 
+  filter(taxa=="angiosperm")
+X=model.matrix(~margin.temp*block, sp.taxa)
+
+if(file.exists("fit.allsp.margintemp.angio.RData")){
+  load("fit.allsp.margintemp.angio.RData")
+}else{
+  data_list=list(N=dim(sp.taxa)[1],
+               NX=ncol(X),
+               S=nlevels(as.factor(sp.taxa$species)),
+               species=as.numeric(as.factor(sp.taxa$species)),
+               ISP=sp.taxa$dISP,
+               X=X)
+               
+  fit.lm <- stan(file = "lmm_dif.stan",
+                    data=data_list,
+                    iter=1000,
+                    chains=3,
+                    core=3)
+  save(fit.lm,file="fit.allsp.margintemp.angio.RData")
+
+}
+
+# launch_shinystan(fit.lm)
+posteriors_fec<-as.data.frame(fit.lm) |> 
+  dplyr::select(!matches("beta_")) |> 
+  dplyr::select(matches("beta"))
+colnames(posteriors_fec)[1:ncol(X)]=colnames(X)
+
+
+# contrast.max=
+contrast_cor=as.data.frame(X) |> 
+  unique() |>
+  mutate(margin.temp=case_when(margin.tempcold==1~"cold",
+                               margin.temphot==1~"hot",
+                               TRUE~"mid"),
+         zone=case_when(blockeurope==1~"europe",
+                        TRUE~"america")) |> 
+  mutate(margin.temp=factor(margin.temp,levels=c("cold","mid","hot"))) |> 
+  tibble::rownames_to_column(var = "code") |> 
+  dplyr::select(code,margin.temp,zone) |> 
+  mutate(contrast=paste0(margin.temp,"_",zone))
+
+contrast_mat= X |> unique() |>  t()
+contrast_post=as.matrix(posteriors_fec)[,1:ncol(X)] %*% contrast_mat
+
+as.data.frame(contrast_post) |> 
+  pivot_longer(cols=everything(),
+               names_to = "code") |>
+  left_join(contrast_cor,by="code") |> 
+  mutate(zone=factor(zone,levels=c("america","europe"))) |> 
+  ggplot(aes(margin.temp,value,color=zone))+
+  geom_boxplot(outlier.colour = NA)+
+  scale_color_manual(values=c("firebrick","slateblue"))+
+  theme(axis.title=element_blank(),
+        legend.position = "bottom")+
+  geom_hline(yintercept = 0,color="gray12",type="dashed")+
+  labs(title="Log ratio of fecundity relative to \nthe mean fecundity of the niche, \n Angiosperms",
+       color="Geographical zone:")-> p
+
+p
+ggsave( p,
+        filename = "bes_fig/MarginTempCont_angios.png",
+        dpi = 600,
+        width = 18,
+        height=14,
+        units = "cm")
+
+## gymno
+sp.taxa=sp.bayes |> 
+  filter(taxa=="gymnosperm")
+X=model.matrix(~margin.temp*zone, sp.taxa)
+
+if(file.exists("fit.allsp.margintemp.gymno.RData")){
+  load("fit.allsp.margintemp.gymno.RData")
+}else{
+  data_list=list(N=dim(sp.taxa)[1],
+               NX=ncol(X),
+               S=nlevels(as.factor(sp.taxa$species)),
+               species=as.numeric(as.factor(sp.taxa$species)),
+               ISP=sp.taxa$dISP,
+               X=X)
+               
+  fit.lm <- stan(file = "lmm_dif.stan",
+                    data=data_list,
+                    iter=1000,
+                    chains=3,
+                    core=3)
+  save(fit.lm,file="fit.allsp.margintemp.gymno.RData")
+
+}
+
+# launch_shinystan(fit.lm)
+posteriors_fec<-as.data.frame(fit.lm) |> 
+  dplyr::select(!matches("beta_")) |> 
+  dplyr::select(matches("beta"))
+colnames(posteriors_fec)[1:ncol(X)]=colnames(X)
+
+
+contrast_cor=as.data.frame(X) |> 
+  unique() |>
+  mutate(margin.temp=case_when(margin.tempcold==1~"cold",
+                               margin.temphot==1~"hot",
+                               TRUE~"mid"),
+         zone=case_when(zoneeurope==1~"europe",
+                        zonewest==1~"west",
+                        TRUE~"east")) |> 
+  mutate(margin.temp=factor(margin.temp,levels=c("cold","mid","hot"))) |> 
+  tibble::rownames_to_column(var = "code") |> 
+  dplyr::select(code,margin.temp,zone) |> 
+  mutate(contrast=paste0(margin.temp,"_",zone))
+
+contrast_mat= X |> unique() |>  t()
+contrast_post=as.matrix(posteriors_fec)[,1:ncol(X)] %*% contrast_mat
+
+as.data.frame(contrast_post) |> 
+  pivot_longer(cols=everything(),
+               names_to = "code") |>
+  left_join(contrast_cor,by="code") |> 
+  mutate(zone=factor(zone,levels=c("west","east","europe"))) |> 
+  ggplot(aes(margin.temp,value,color=zone))+
+  geom_boxplot(outlier.colour = NA)+
+  scale_color_manual(values=c("firebrick4","firebrick1","slateblue"))+
+  theme(axis.title=element_blank(),
+        legend.position = "bottom")+
+  geom_hline(yintercept = 0,color="gray12",type="dashed")+
+  labs(title="Log ratio of fecundity relative to \nthe mean fecundity of the niche, \nGymnosperms",
+       color="Geographical \nzone:")-> p
+
+p
+ggsave( p,
+        filename = "bes_fig/MarginTempCont_gymno.png",
+        dpi = 600,
+        width = 18,
+        height=14,
+        units = "cm")
+```
+
+# Does the structure of the climatic space impact the effect of temperature on fecundity?
+
+## Climatic space and correlation of DH/mat inside species distribution
+
+### ACP of climatic space
+```{r climacp,fig.height=12,fig.width=19}
+z="europe"
+for (z in c("west","east","europe")){
+  clim.acp=rbind(fecundity.eu_clim |> mutate(block="europe"),
+                 fecundity.am_clim|> mutate(block="america")) |>
+    filter(BA!=0) |> #rm absences
+    left_join(phylo.select) |> 
+    filter(zone==z) |> 
+    # sample_n(size = 10000) |>
+    # filter(ISP<quantile(ISP,probs=0.97)) |>  # remove extreme values
+    dplyr::select(plot,zone,taxa,lon,lat,mat,tmin,map,pmax,pet) |> #,cmi_min,sgdd,cmi_max,wai,cmi_mean
+    mutate(dh=12*pet-map) |> 
+    filter(dh>=(-2000)) |> 
+    unique() |> 
+    drop_na()
+  acp=prcomp(clim.acp[,c("mat","dh")],scale=TRUE)
+# fviz_pca_ind(acp)
+# fviz_pca_var(acp,axes=c(1,3))
+  species=rbind(fecundity.eu_clim |> mutate(block="europe"),
+                 fecundity.am_clim|> mutate(block="america")) |>
+    filter(BA!=0) |> #rm absences
+    left_join(phylo.select) |> 
+    filter(zone==z) |> 
+    # sample_n(size = 10000) |>
+    # filter(ISP<quantile(ISP,probs=0.97)) |>  # remove extreme values
+    dplyr::select(species,mat,map,pet) |> #,cmi_min,sgdd,cmi_max,wai,cmi_mean
+    mutate(dh=12*pet-map) |> 
+    filter(dh>=(-2000)) |> 
+    group_by(species) |> 
+    summarise(mat=median(mat),
+              dh=median(dh))
+  
+  pred=cbind(species,
+             predict(acp,species))
+
+  pca.plot=fviz_pca(acp,
+           axes=c(1,2),
+           # geom.ind="point",
+           geom.var=c("arrow","text"),
+           # palette=c("firebrick1","slateblue","firebrick4"),
+           # habillage=clim.acp$species,
+           col.var="black",
+           col.ind=NA,
+           alpha.ind=0.05,
+           # addEllipses=TRUE,
+           )+
+    theme(legend.position = "none")+
+    geom_point(data=as.data.frame(pred),aes(x=PC1,y=PC2,color=species))+
+    ggtitle( label = str_to_title(z))+
+    theme(plot.title = element_text(hjust=0.48))
+    # labs(color="Geographical \nzone",
+         # fill="Geographical \nzone",
+         # shape="Geographical \nzone")
+ print(pca.plot)
+ 
+ cor<-rbind(fecundity.eu_clim |> mutate(block="europe"),
+                 fecundity.am_clim|> mutate(block="america")) |>
+    filter(BA!=0) |> #rm absences
+    left_join(phylo.select) |> 
+    filter(zone==z) |> 
+    # sample_n(size = 10000) |>
+    # filter(ISP<quantile(ISP,probs=0.97)) |>  # remove extreme values
+    dplyr::select(plot,zone,species,taxa,lon,lat,mat,tmin,map,pmax,pet) |> #,cmi_min,sgdd,cmi_max,wai,cmi_mean
+    mutate(dh=12*pet-map) |> 
+    filter(dh>=(-2000)) |> 
+    group_by(species) |> 
+    summarise(cormatdh=cor(mat,dh,use="complete")) |> 
+   ggplot(aes(cormatdh))+
+   geom_histogram()+
+   xlim(c(-1,1))+
+   ylim(c(0,9))+
+   geom_vline(xintercept = 0,color="darkred",linetype="dashed")+
+   theme(axis.title = element_blank())
+ 
+ 
+ assign(paste0(z,"_plot"),
+        cowplot::plot_grid(pca.plot,cor,nrow=2,rel_widths = c(1,1),rel_heights = c(2,1)),
+        env=.GlobalEnv)
+}
+
+cowplot::plot_grid(west_plot,east_plot,europe_plot,ncol = 3)->p
+# ggsave( p,
+#         filename = "bes_fig/AcpClim.png",
+#         dpi = 600,
+#         width = 19,
+#         height=12,
+#         units = "cm")
+z
+pca.plot=fviz_pca(acp,
+           axes=c(1,2),
+           geom.ind="point",
+           geom.var=c("arrow","text"),
+           # palette=c("firebrick1","slateblue","firebrick4"),
+           # habillage=clim.acp$species,
+           col.var="black",
+           # col.ind=NA,
+           alpha.ind=0.05,
+           # addEllipses=TRUE,
+           )
+```
+
+### Correlation of DH/MAT
+
+```{r cordhmat}
+rbind(fecundity.eu_clim |> mutate(block="europe"),
+                 fecundity.am_clim|> mutate(block="america")) |>
+  left_join(phylo.select) |> 
+  filter(BA!=0) |> #rm absences
+  mutate(dh=12*pet-map) |> 
+  group_by(species) |> 
+  mutate(cor.mat.dh=cor(dh,mat,use="complete.obs")) |> 
+  dplyr::select(species,cor.mat.dh,zone) |> 
+  unique()|> 
+  ggplot(aes(cor.mat.dh,color=zone))+
+  geom_density()+
+  scale_color_manual(values=c("firebrick1","slateblue","firebrick4"))+
+  labs(color="Geographical \nzone",
+       y="",
+       x="Intraspecific correlation between MAT and DH")
+```
+
+### Exemple of highly correlated species
+
+```{r corex,fig.height=6,fig.width=12}
+rbind(fecundity.eu_clim |> mutate(block="europe"),
+      fecundity.am_clim|> mutate(block="america")) |>
+  left_join(phylo.select) |> 
+  filter(species %in% c("caryaOvata","pinusEdulis")) |> 
+  dplyr::select(plot,lon,lat,species,BA,fecGmMu,fecGmSd,sgdd,wai,pet,map,mat,block,zone) |> 
+  filter(BA!=0) |> #rm absences
+  mutate(dh=12*pet-map) |> 
+  group_by(species) |> 
+  # compute weighted quantiles of sgdd and wai, and correlation between wai and sgdd
+  mutate(margin.temp=case_when(mat<=weighted.quantile(mat,w=BA, prob=0.1)[[1]]~"cold",
+                               mat<weighted.quantile(mat,w=BA, prob=0.55)[[1]]&
+                                 mat>weighted.quantile(mat,w=BA, prob=0.45)[[1]]~"midtemp",
+                               mat>=weighted.quantile(mat,w=BA, prob=0.9)[[1]]~"hot"),
+         margin.temp=factor(margin.temp,levels=c("midtemp","cold","hot"))
+         ) |>
+  filter(dh>quantile(dh,probs = 0.01,na.rm=TRUE)) |> filter(dh<quantile(dh,probs=0.99,na.rm=TRUE)) |> 
+  sample_n(max(n())) |> 
+  ggplot(aes(mat,dh,color=margin.temp))+
+  geom_point()+
+  geom_smooth(method="lm",aes(color=NULL))+
+  facet_wrap(~species)+
+  scale_color_manual(values=c("bisque2","steelblue1","firebrick1"))+
+  labs(color="Temperature margins :",
+       x="Mean annual temperature (°C)",
+       y="Water deficit (mm)")->p
+
+ggsave( p,
+        filename = "bes_fig/SpCorEx.png",
+        dpi = 600,
+        width = 13,
+        height=7,
+        units = "cm")
+
+```
+
+## Effect of aridity gradient in species margins on fecundity, for species with high correlation between mat & dh
+
+```{r ariditycor}
+sp.bayes=rbind(fecundity.eu_clim |> mutate(block="europe"),
+                 fecundity.am_clim|> mutate(block="america")) |>
+  left_join(phylo.select) |> 
+  filter(BA!=0) |> #rm absences
+  mutate(dh=12*pet-map) |> 
+  group_by(species) |> 
+  dplyr::select(plot,lon,lat,species,BA,fecGmMu,fecGmSd,dh,mat,block,zone) |> 
+  mutate(margin.temp=case_when(mat<weighted.quantile(mat,w=BA, prob=0.1)[[1]]~"cold",
+                               mat<weighted.quantile(mat,w=BA, prob=0.55)[[1]]&
+                                 mat>weighted.quantile(mat,w=BA, prob=0.45)[[1]]~"midtemp",
+                               mat>weighted.quantile(mat,w=BA, prob=0.9)[[1]]~"hot"),
+         margin.deficit=case_when(dh<weighted.quantile(dh,w=BA, prob=0.1)[[1]]~"humid",
+                              dh<weighted.quantile(dh,w=BA, prob=0.55)[[1]]&
+                                 dh>weighted.quantile(dh,w=BA, prob=0.45)[[1]]~"midhum",
+                               dh>weighted.quantile(dh,w=BA, prob=0.9)[[1]]~"arid")) |> 
+  mutate(margin.temp=factor(margin.temp,levels=c("midtemp","cold","hot")),
+         margin.deficit=factor(margin.deficit,levels=c("midhum","arid","humid"))) |> 
+  filter(!is.na(margin.temp)) |>
+  ungroup() |> 
+  mutate(ISP=fecGmMu/BA,
+         s_ISP=fecGmSd/(BA^2))
+
+sp.bayes |> 
+  filter(!is.na(dh)) |> 
+  group_by(species) |>
+  mutate(dh.cat=cut(dh,breaks = seq(min(dh),max(dh),by=100)),
+         cormatdh=cor(mat,dh,use="complete")) |>
+  group_by(species,cormatdh,margin.temp,dh.cat) |> 
+  summarise(n=n()) |> 
+  filter(margin.temp!="midtemp") |> 
+  pivot_wider(names_from = margin.temp,
+              values_from = n) |> 
+  filter(!is.na(dh.cat)) |> 
+  mutate(across(c("cold","hot"),
+                ~replace_na(.,0))) |> 
+  mutate(d=abs(cold-hot)/(hot+cold)) |> 
+  summarise(n=mean(d)) |> arrange(n) |> 
+  filter(n>0.7) |> pull(species)->speciescor
+
+# mid_isp<-sp.bayes |> 
+#     group_by(species,margin.temp) |> 
+#     summarise(mid_isp=median(ISP)[[1]]) |> 
+#     filter(margin.temp=="midtemp") |>
+#     ungroup() |> 
+#     dplyr::select(species,mid_isp)
+mid_isp<-sp.bayes |> 
+    group_by(species) |> 
+    summarise(mid_isp=median(ISP)[[1]]) |> 
+    ungroup() |> 
+    dplyr::select(species,mid_isp)
+sp.bayes<-sp.bayes |>
+  filter(!species %in% speciescor) |> 
+  left_join(mid_isp) |>
+  mutate(dISP=ISP/mid_isp,
+         s_ISP=s_ISP/(mid_isp^2)) |> 
+  filter(!is.na(dISP))
+
+X=model.matrix(~margin.temp*zone, sp.bayes)
+
+if(file.exists("fit.allsp.margintemp.9par.spselect69.RData")){
+  load("fit.allsp.margintemp.9par.spselect.RData")
+}else{
+  data_list=list(N=dim(sp.bayes)[1],
+               NX=ncol(X),
+               S=nlevels(as.factor(sp.bayes$species)),
+               species=as.numeric(as.factor(sp.bayes$species)),
+               ISP=sp.bayes$dISP,
+               X=X)
+               
+  fit.lm <- stan(file = "lmm_dif.stan",
+                    data=data_list,
+                    iter=1000,
+                    chains=3,
+                    core=3)
+  save(fit.lm,file="fit.allsp.margintemp.9par.spselect69.RData")
+
+}
+
+# launch_shinystan(fit.lm)
+posteriors_fec<-as.data.frame(fit.lm) |> 
+  dplyr::select(!matches("beta_")) |> 
+  dplyr::select(matches("beta"))
+colnames(posteriors_fec)[1:ncol(X)]=colnames(X)
+
+
+# contrast.max=
+contrast_cor=as.data.frame(X) |> 
+  unique() |>
+  mutate(margin.temp=case_when(margin.tempcold==1~"cold",
+                               margin.temphot==1~"hot",
+                               TRUE~"mid"),
+         zone=case_when(zoneeurope==1~"europe",
+                        zonewest==1~"west",
+                        TRUE~"east")) |> 
+  mutate(margin.temp=factor(margin.temp,levels=c("cold","mid","hot"))) |> 
+  tibble::rownames_to_column(var = "code") |> 
+  dplyr::select(code,margin.temp,zone) |> 
+  mutate(contrast=paste0(margin.temp,"_",zone))
+
+contrast_mat= X |> unique() |>  t()
+contrast_post=as.matrix(posteriors_fec)[,1:ncol(X)] %*% contrast_mat
+
+as.data.frame(contrast_post) |> 
+  pivot_longer(cols=everything(),
+               names_to = "code") |>
+  left_join(contrast_cor,by="code") |> 
+  mutate(zone=factor(zone,levels=c("west","east","europe"))) |> 
+  ggplot(aes(margin.temp,value,color=zone))+
+  geom_boxplot(outlier.colour = NA)+
+  scale_color_manual(values=c("firebrick4","firebrick1","slateblue"))+
+  theme(axis.title=element_blank(),
+        legend.position = "bottom")+
+  geom_hline(yintercept = 0,color="gray12")+
+  labs(title="Log ratio of fecundity relative to \nthe mean fecundity of the niche",
+       color="Geographical \nzone:")-> p
+p
+ggsave( p,
+        filename = "bes_fig/MarginTempCont_spcor70.png",
+        dpi = 600,
+        width = 18,
+        height=14,
+        units = "cm")
+```
+
+
+## Effect of aridity gradient in species margins on fecundity, for species with low correlation between mat & dh
+
+```{r ariditygrad}
+sp.ancova=rbind(fecundity.eu_clim |> mutate(block="europe"),
+                fecundity.am_clim|> mutate(block="america")) |>
+  left_join(phylo.select) |> 
+  dplyr::select(plot,lon,lat,species,BA,fecGmMu,fecGmSd,sgdd,wai,pet,map,mat,block,zone) |> 
+  filter(BA!=0) |> #rm absences
+  mutate(dh=12*pet-map) |> 
+  filter(dh>(-2000)) |>
+  group_by(species) |> 
+  # compute weighted quantiles of sgdd and wai, and correlation between wai and sgdd
+  mutate(margin.temp=case_when(mat<=weighted.quantile(mat,w=BA, prob=0.1)[[1]]~"cold",
+                               mat<weighted.quantile(mat,w=BA, prob=0.55)[[1]]&
+                                 mat>weighted.quantile(mat,w=BA, prob=0.45)[[1]]~"midtemp",
+                               mat>=weighted.quantile(mat,w=BA, prob=0.9)[[1]]~"hot"),
+         margin.temp=factor(margin.temp,levels=c("midtemp","cold","hot"))
+         ) |>
+  # filter(dh>quantile(dh,probs = 0.01,na.rm=TRUE)) |> filter(dh<quantile(dh,probs=0.99,na.rm=TRUE)) |> 
+  filter(!is.na(margin.temp)) |> 
+  # filter(!is.na(margin.temp)&!is.na(margin.deficit)) |>
+  # ungroup() |> group_by(species,margin.temp) |> 
+  mutate(dh_old=dh,
+         dh=scale(dh,center=TRUE,scale=FALSE),
+         dh2=dh^2) |> 
+  ungroup() |> 
+  mutate(ISP=fecGmMu/BA,
+         s_ISP=fecGmSd/(BA^2))|> 
+  filter(!is.na(ISP)) |> 
+  filter(!is.na(dh))
+mid_isp<-sp.ancova |> 
+    group_by(species) |> 
+    summarise(mid_isp=median(ISP)[[1]]) |> 
+    ungroup() |> 
+    dplyr::select(species,mid_isp)
+sp.ancova<-sp.ancova |>
+  left_join(mid_isp) |>
+  mutate(dISP=ISP/mid_isp,
+         s_ISP=s_ISP/(mid_isp^2)) |> 
+  filter(!is.na(dISP))
+
+folder="mod_ancova_center3/"
+out_ancova_cont=sp.ancova |> 
+  mutate(fit=NA,
+         quant05=NA,
+         quant95=NA,
+         mean=NA) |> 
+  slice(0)
+for (z in c("europe","east","west")){
+  print(z)
+  # filter data
+  sp.zone=sp.ancova |> 
+    filter(zone==z)
+  
+  sp.zone |> 
+    group_by(species) |> 
+    mutate(dh.cat=cut(dh_old,breaks = seq(min(dh_old),max(dh_old),by=100)),
+           cormatdh=cor(mat,dh_old,use="complete")) |>
+    group_by(species,cormatdh,margin.temp,dh.cat) |> 
+    summarise(n=n()) |> 
+    filter(margin.temp!="midtemp") |> 
+    pivot_wider(names_from = margin.temp,
+                values_from = n) |> 
+    filter(!is.na(dh.cat)) |> 
+    mutate(across(c("cold","hot"),
+                  ~replace_na(.,0))) |> 
+    mutate(d=abs(cold-hot)/(hot+cold)) |> 
+    summarise(n=mean(d)) |> arrange(n) |> 
+    filter(n>0.7) |> pull(species)->speciescor
+  
+  # plot of excluded species
+  sp.zone |> 
+    filter(species %in% speciescor) |>
+    filter(margin.temp!="midtemp") |> 
+    ggplot(aes(dh_old,log(ISP),color=margin.temp))+
+    geom_point(alpha=0.4)+
+    geom_boxplot(aes(dh_old,0,color=margin.temp),outlier.colour = NA)+
+    geom_smooth()+
+    scale_color_manual(values=c("steelblue1","firebrick1"))+
+    facet_wrap(~species)->plot
+  ggsave(filename = paste0(folder,"spExcl_",z,".png"),
+         plot)
+  
+  # fit model
+  sp.mod=sp.zone |> 
+    filter(!species %in% speciescor)
+  
+
+  
+  # if(file.exists(paste0(folder,"ancova_",z,".RData"))){
+  #   load(paste0(folder,"ancova_",z,".RData"))
+  # }else{
+  #   X=model.matrix(~margin.temp*dh+margin.temp*dh2, sp.mod)
+  #   data_zone=list(N=dim(sp.mod)[1],
+  #                  NX=ncol(X),
+  #                  S=nlevels(as.factor(sp.mod$species)),
+  #                  species=as.numeric(as.factor(sp.mod$species)),
+  #                  ISP=sp.mod$ISP,
+  #                  X=X,
+  #                  NULL)
+  #   fit.ancova <- stan(file = "lmm_ancova.stan",
+  #                      data=data_zone,
+  #                      iter=1000,
+  #                      chains=3,
+  #                      core=3,
+  #                      include=FALSE,
+  #                      pars=c("beta_raw"))
+  #   save(fit.ancova,file=paste0(folder,"ancova_",z,".RData"))    
+  # }
+   X=model.matrix(~margin.temp*dh, sp.mod)
+   
+  if(file.exists(paste0(folder,"ancova_",z,"_lin.RData"))){
+    load(paste0(folder,"ancova_",z,"_lin.RData"))
+  }else{
+    data_zone=list(N=dim(sp.mod)[1],
+                   NX=ncol(X),
+                   S=nlevels(as.factor(sp.mod$species)),
+                   species=as.numeric(as.factor(sp.mod$species)),
+                   ISP=sp.mod$dISP,
+                   X=X,
+                   NULL)
+    fit.ancova_lin <- stan(file = "lmm_ancova.stan",
+                       data=data_zone,
+                       iter=1000,
+                       chains=3,
+                       core=3,
+                       include=FALSE,
+                       pars=c("beta_raw"))
+    save(fit.ancova_lin,file=paste0(folder,"ancova_",z,"_lin.RData"))    
+  }
+  # bic_quad=-2*summary(fit.ancova)$summary["lp__","mean"]+8*dim(sp.mod)[1]
+  # bic_lin=-2*summary(fit.ancova_lin)$summary["lp__","mean"]+5*dim(sp.mod)[1]
+  # 
+  # if(bic_quad<bic_lin){
+  #   fit=fit.ancova
+  #   X=model.matrix(~margin.temp*dh+margin.temp*dh2, sp.mod)
+  # }else{
+  #   fit=fit.ancova_lin
+  #   X=model.matrix(~margin.temp*dh, sp.mod)
+  # }
+  fit=fit.ancova_lin
+  
+  posteriors_fec<-as.data.frame(fit) |>
+    dplyr::select(!matches("beta_")) |>
+    dplyr::select(matches("beta"))
+  colnames(posteriors_fec)[1:ncol(X)]=colnames(X)
+  speciescode=sp.mod |> ungroup()|> dplyr::select(species) |> mutate(code=as.numeric(as.factor(species))) |> unique()
+  speciesranef=as.data.frame(summary(fit)$summary) |> 
+    rownames_to_column(var="parameter") |> 
+    filter(grepl("alpha",parameter)) |> 
+    dplyr::select(parameter,mean) |> 
+    mutate(code=as.numeric(gsub(".*?\\[([^]]*)\\].*", "\\1", parameter))) |> 
+    left_join(speciescode) |> 
+    dplyr::select(species,mean)
+  
+  contrast_mat= X |>  t()
+  contrast_post=as.matrix(posteriors_fec)[,1:ncol(X)] %*% contrast_mat
+  fit=apply(contrast_post,2,median)
+  quant05=apply(contrast_post,2,quantile,probs=0.05)
+  quant95=apply(contrast_post,2,quantile,probs=0.95)
+  
+  output=cbind(sp.mod,
+               fit=fit,
+               quant05=quant05,
+               quant95=quant95) |>
+    left_join(speciesranef) 
+
+  out_ancova_cont=rbind(out_ancova_cont,
+                   output)
+  rm(output,quant05,quant95,fit,contrast_post,contrast_mat,speciesranef,
+     speciescode,posteriors_fec,data_zone,sp.mod,sp.zone)
+}
+
+out_ancova_cont |> 
+  mutate(zone=factor(str_to_title(zone),levels=c("West","East","Europe")),
+         margin.temp=case_when(margin.temp=="midtemp"~"center",
+                               TRUE~margin.temp)) |> 
+  ggplot()+
+  geom_point(aes(dh,log(dISP)-mean,color=margin.temp),size=0.6,alpha=0.05)+
+  geom_ribbon(aes(x=dh,ymin=quant05,ymax=quant95,fill=margin.temp),alpha=0.8)+
+  geom_line(aes(dh,fit,group=margin.temp),size=0.2,color="black")+
+  geom_boxplot(aes(dh,y=-12,color=margin.temp),position=position_dodge(width=2),outlier.colour = NA)+
+  scale_fill_manual(values=c("bisque2","steelblue1","firebrick1"))+
+  scale_color_manual(values=c("bisque2","steelblue1","firebrick1"))+
+  facet_wrap(~zone)+
+  theme(text = element_text(size=13),
+        legend.position = "bottom")+
+  labs(y="Log ratio of fecundity relative to the mean",
+       x="Water deficit (mm, centered by species)",
+       color="Temperature margin",
+       fill="Temperature margin")->p
+p
+# out_ancova_cont |>
+#   group_by(species) |> 
+#   mutate(margin.deficit=case_when(dh<weighted.quantile(dh,w=BA, prob=0.1)[[1]]~"humid",
+#                               dh<weighted.quantile(dh,w=BA, prob=0.55)[[1]]&
+#                                  dh>weighted.quantile(dh,w=BA, prob=0.45)[[1]]~"midhum",
+#                                dh>weighted.quantile(dh,w=BA, prob=0.9)[[1]]~"arid")) |> 
+#   ungroup() |> 
+#   filter(!is.na(margin.deficit)) |> 
+#   group_by(zone,margin.temp,margin.deficit,plot) |> summarise(BAtot=sum(BA)) |> ungroup() |>
+#   ggplot(aes(margin.deficit,BAtot,color=margin.temp))+
+#   geom_boxplot()+
+#   scale_color_manual(values=c("bisque2","steelblue1","firebrick1"))+
+#   facet_wrap(~zone)+
+#   scale_y_log10()
+
+
+out_ancova_cont |> 
+  mutate(margin.temp=factor(margin.temp,levels=c("cold","midtemp","hot"))) |> 
+  ggplot()+
+  geom_point(aes(dh,log(dISP)-mean,color=zone),size=0.6,alpha=0.05)+
+  geom_ribbon(aes(x=dh,ymin=quant05,ymax=quant95,fill=zone),alpha=0.8)+
+  geom_line(aes(dh,fit,group=zone),size=0.2,color="black")+
+  geom_boxplot(aes(dh,y=-10,color=zone),position=position_dodge(width=1),outlier.colour = NA)+
+  geom_boxplot(aes(x=4,y=log(dISP)-mean,color=zone),position=position_dodge(width=1),outlier.colour = NA)+
+  scale_fill_manual(values=c("firebrick1","slateblue","firebrick4"))+
+  scale_color_manual(values=c("firebrick1","slateblue","firebrick4"))+
+  theme(axis.text.x = element_text(colour = inferno(6)))+
+  facet_wrap(~margin.temp)
+
+
+out_ancova_cont |> 
+  mutate(margin.temp=factor(margin.temp,levels=c("cold","midtemp","hot"))) |> 
+  filter(margin.temp=="hot") |> 
+  ggplot()+
+  geom_point(aes(dh,log(dISP)-mean,color=zone),size=0.6,alpha=0.01)+
+  geom_ribbon(aes(x=dh,ymin=quant05,ymax=quant95,fill=zone),alpha=0.8)+
+  geom_line(aes(dh,fit,color=zone),size=0.2)+
+  geom_boxplot(aes(dh,y=-10,color=zone),position=position_dodge(width=1),outlier.colour = NA)+
+  # geom_boxplot(aes(x=4,y=log(dISP)-mean,color=zone),position=position_dodge(width=1),outlier.colour = NA)+
+  scale_fill_manual(values=c("firebrick1","slateblue","firebrick4"))+
+  scale_color_manual(values=c("firebrick1","slateblue","firebrick4"))+
+  theme(axis.text.x = element_text(colour = inferno(6)),
+        text = element_text(size=13))+
+  ggtitle("Fecundity variation with aridity in species hot margin")+
+  labs(y="Log ratio of fecundity relative to the mean",
+       x="Water deficit (mm, centered by species)",
+       color="Biogeographical zone",
+       fill="Biogeographical zone")->p
+
+out_ancova_cont |> 
+  mutate(zone=factor(zone,levels=c("west","east","europe")),
+         margin.temp=factor(margin.temp,levels=c("cold","midtemp","hot"))) |>
+  ggplot(aes(margin.temp,fit,color=zone))+
+  geom_boxplot(outlier.color = NA)+
+  scale_color_manual(values=c("firebrick4","firebrick1","slateblue"))
+  geom_line(aes(dh,fit,color=margin.temp),size=0.6)+
+  geom_point(aes(dh,log(ISP)-mean,color=margin.temp),size=0.6,alpha=0.1)+
+  # geom_smooth(aes(dh,log(ISP)-mean,color=margin.temp),method="gam")+
+  geom_ribbon(aes(x=dh,ymin=quant05,ymax=quant95,fill=margin.temp),alpha=0.8)+
+  scale_fill_manual(values=c("bisque2","steelblue1","firebrick1"))+
+  scale_color_manual(values=c("bisque2","steelblue1","firebrick1"))+
+  facet_wrap(~zone)
+ggsave( p,
+        filename = "bes_fig/Int_3.png",
+        dpi = 600,
+        width = 17,
+        height=13,
+        units = "cm")
+```
+
+
+## Effect of aridity gradient in species margins on fecundity, difference between taxa, for species with low correlation between mat & dh
+
+```{r ariditygrad}
+sp.ancova=rbind(fecundity.eu_clim |> mutate(block="europe"),
+                fecundity.am_clim|> mutate(block="america")) |>
+  left_join(phylo.select) |> 
+  dplyr::select(plot,lon,lat,species,taxa,BA,fecGmMu,fecGmSd,sgdd,wai,pet,map,mat,block,zone) |> 
+  filter(BA!=0) |> #rm absences
+  mutate(dh=12*pet-map) |> 
+  filter(dh>(-2000)) |>
+  group_by(species) |> 
+  # compute weighted quantiles of sgdd and wai, and correlation between wai and sgdd
+  mutate(margin.temp=case_when(mat<=weighted.quantile(mat,w=BA, prob=0.1)[[1]]~"cold",
+                               mat<weighted.quantile(mat,w=BA, prob=0.55)[[1]]&
+                                 mat>weighted.quantile(mat,w=BA, prob=0.45)[[1]]~"midtemp",
+                               mat>=weighted.quantile(mat,w=BA, prob=0.9)[[1]]~"hot"),
+         margin.temp=factor(margin.temp,levels=c("midtemp","cold","hot"))
+         ) |>
+  # filter(dh>quantile(dh,probs = 0.01,na.rm=TRUE)) |> filter(dh<quantile(dh,probs=0.99,na.rm=TRUE)) |> 
+  filter(!is.na(margin.temp)) |> 
+  # filter(!is.na(margin.temp)&!is.na(margin.deficit)) |>
+  # ungroup() |> group_by(species,margin.temp) |> 
+  mutate(dh_old=dh,
+         dh=scale(dh,center=TRUE,scale=FALSE),
+         dh2=dh^2) |> 
+  ungroup() |> 
+  mutate(ISP=fecGmMu/BA,
+         s_ISP=fecGmSd/(BA^2))|> 
+  filter(!is.na(ISP)) |> 
+  filter(!is.na(dh))
+mid_isp<-sp.ancova |> 
+    group_by(species) |> 
+    summarise(mid_isp=median(ISP)[[1]]) |> 
+    ungroup() |> 
+    dplyr::select(species,mid_isp)
+sp.ancova<-sp.ancova |>
+  left_join(mid_isp) |>
+  mutate(dISP=ISP/mid_isp,
+         s_ISP=s_ISP/(mid_isp^2)) |> 
+  filter(!is.na(dISP))
+
+folder="mod_ancova_taxa/"
+out_ancova_taxa=sp.ancova |> 
+  mutate(taxa=NA,
+         fit=NA,
+         quant05=NA,
+         quant95=NA,
+         mean=NA) |> 
+  slice(0)
+g="angiosperm"
+for (z in c("europe","america")){
+  print(z)
+  # filter data
+  sp.zone=sp.ancova |> 
+    filter(block==z) |> 
+    filter(taxa==g)
+
+  X=model.matrix(~margin.temp*dh, sp.zone)
+   
+  if(file.exists(paste0(folder,"ancova_",z,"_angiosperm_lin.RData"))){
+    load(paste0(folder,"ancova_",z,"_angiosperm_lin.RData"))
+  }else{
+    data_zone=list(N=dim(sp.zone)[1],
+                   NX=ncol(X),
+                   S=nlevels(as.factor(sp.zone$species)),
+                   species=as.numeric(as.factor(sp.zone$species)),
+                   ISP=sp.zone$dISP,
+                   X=X,
+                   NULL)
+    fit.ancova_lin <- stan(file = "lmm_ancova.stan",
+                       data=data_zone,
+                       iter=1000,
+                       chains=3,
+                       core=3,
+                       include=FALSE,
+                       pars=c("beta_raw"))
+    save(fit.ancova_lin,file=paste0(folder,"ancova_",z,"_angiosperm_lin.RData"))    
+  }
+  
+  fit=fit.ancova_lin
+  
+  posteriors_fec<-as.data.frame(fit) |>
+    dplyr::select(!matches("beta_")) |>
+    dplyr::select(matches("beta"))
+  colnames(posteriors_fec)[1:ncol(X)]=colnames(X)
+  speciescode=sp.zone |> ungroup()|> dplyr::select(species) |> mutate(code=as.numeric(as.factor(species))) |> unique()
+  speciesranef=as.data.frame(summary(fit)$summary) |> 
+    rownames_to_column(var="parameter") |> 
+    filter(grepl("alpha",parameter)) |> 
+    dplyr::select(parameter,mean) |> 
+    mutate(code=as.numeric(gsub(".*?\\[([^]]*)\\].*", "\\1", parameter))) |> 
+    left_join(speciescode) |> 
+    dplyr::select(species,mean)
+  
+  contrast_mat= X |>  t()
+  contrast_post=as.matrix(posteriors_fec)[,1:ncol(X)] %*% contrast_mat
+  fit=apply(contrast_post,2,median)
+  quant05=apply(contrast_post,2,quantile,probs=0.05)
+  quant95=apply(contrast_post,2,quantile,probs=0.95)
+  
+  output=cbind(sp.zone,
+               fit=fit,
+               quant05=quant05,
+               quant95=quant95) |>
+    left_join(speciesranef,by="species") 
+
+  out_ancova_taxa=rbind(out_ancova_taxa,
+                   output)
+  rm(output,quant05,quant95,fit,contrast_post,contrast_mat,speciesranef,
+     speciescode,posteriors_fec,data_zone,sp.mod,sp.zone)
+}
+
+g="gymnosperm"
+for (z in c("europe","east","west")){
+  print(z)
+  # filter data
+  sp.zone=sp.ancova |> 
+    filter(zone==z) |> 
+    filter(taxa==g)
+
+  X=model.matrix(~margin.temp*dh, sp.zone)
+   
+  if(file.exists(paste0(folder,"ancova_",z,"_gymnosperm_lin.RData"))){
+    load(paste0(folder,"ancova_",z,"_gymnosperm_lin.RData"))
+  }else{
+    data_zone=list(N=dim(sp.zone)[1],
+                   NX=ncol(X),
+                   S=nlevels(as.factor(sp.zone$species)),
+                   species=as.numeric(as.factor(sp.zone$species)),
+                   ISP=sp.zone$dISP,
+                   X=X,
+                   NULL)
+    fit.ancova_lin <- stan(file = "lmm_ancova.stan",
+                       data=data_zone,
+                       iter=1000,
+                       chains=3,
+                       core=3,
+                       include=FALSE,
+                       pars=c("beta_raw"))
+    save(fit.ancova_lin,file=paste0(folder,"ancova_",z,"_gymnosperm_lin.RData"))    
+  }
+  
+  fit=fit.ancova_lin
+  
+  posteriors_fec<-as.data.frame(fit) |>
+    dplyr::select(!matches("beta_")) |>
+    dplyr::select(matches("beta"))
+  colnames(posteriors_fec)[1:ncol(X)]=colnames(X)
+  speciescode=sp.zone |> ungroup()|> dplyr::select(species) |> mutate(code=as.numeric(as.factor(species))) |> unique()
+  speciesranef=as.data.frame(summary(fit)$summary) |> 
+    rownames_to_column(var="parameter") |> 
+    filter(grepl("alpha",parameter)) |> 
+    dplyr::select(parameter,mean) |> 
+    mutate(code=as.numeric(gsub(".*?\\[([^]]*)\\].*", "\\1", parameter))) |> 
+    left_join(speciescode) |> 
+    dplyr::select(species,mean)
+  
+  contrast_mat= X |>  t()
+  contrast_post=as.matrix(posteriors_fec)[,1:ncol(X)] %*% contrast_mat
+  fit=apply(contrast_post,2,median)
+  quant05=apply(contrast_post,2,quantile,probs=0.05)
+  quant95=apply(contrast_post,2,quantile,probs=0.95)
+  
+  output=cbind(sp.zone,
+               fit=fit,
+               quant05=quant05,
+               quant95=quant95) |>
+    left_join(speciesranef,by="species") 
+
+  out_ancova_taxa=rbind(out_ancova_taxa,
+                   output)
+  rm(output,quant05,quant95,fit,contrast_post,contrast_mat,speciesranef,
+     speciescode,posteriors_fec,data_zone,sp.mod,sp.zone)
+}
+
+
+
+out_ancova_taxa |>
+  mutate(zone=factor(str_to_title(zone),levels=c("West","East","Europe")),
+         margin.temp=case_when(margin.temp=="midtemp"~"center",
+                               TRUE~margin.temp)) |>
+  ggplot()+
+  geom_point(aes(dh,log(dISP)-mean,color=margin.temp),size=0.6,alpha=0.05)+
+  geom_ribbon(aes(x=dh,ymin=quant05,ymax=quant95,fill=margin.temp),alpha=0.8)+
+  geom_line(aes(dh,fit,group=margin.temp),size=0.2,color="black")+
+  geom_boxplot(aes(dh,y=-12,color=margin.temp),position=position_dodge(width=2),outlier.colour = NA)+
+  scale_fill_manual(values=c("bisque2","steelblue1","firebrick1"))+
+  scale_color_manual(values=c("bisque2","steelblue1","firebrick1"))+
+  facet_wrap(taxa~zone)+
+  theme(text = element_text(size=13),
+        legend.position = "bottom")+
+  labs(y="Log ratio of fecundity relative to the mean",
+       x="Water deficit (mm, centered by species)",
+       color="Temperature margin",
+       fill="Temperature margin")
+
+# ggsave( p,
+#         filename = "bes_fig/Int_2.png",
+#         dpi = 600,
+#         width = 17,
+#         height=13,
+#         units = "cm")
+```
+
+# Does variation in fecundity in species margin depends on the ecology of species?
+```{r fitspecies}
+sp.ancova=rbind(fecundity.eu_clim |> mutate(block="europe"),
+                fecundity.am_clim|> mutate(block="america")) |>
+  left_join(phylo.select) |> 
+  dplyr::select(plot,lon,lat,species,BA,fecGmMu,fecGmSd,sgdd,wai,pet,map,mat,block,zone) |> 
+  filter(BA!=0) |> #rm absences
+  mutate(dh=12*pet-map) |> 
+  group_by(species) |> 
+  # compute weighted quantiles of sgdd and wai, and correlation between wai and sgdd
+  mutate(margin.temp=case_when(mat<=weighted.quantile(mat,w=BA, prob=0.1)[[1]]~"cold",
+                               mat<weighted.quantile(mat,w=BA, prob=0.55)[[1]]&
+                                 mat>weighted.quantile(mat,w=BA, prob=0.45)[[1]]~"midtemp",
+                               mat>=weighted.quantile(mat,w=BA, prob=0.9)[[1]]~"hot"),
+         margin.temp=factor(margin.temp,levels=c("midtemp","cold","hot")),
+         mean.dh=mean(dh,na.rm=TRUE),
+         mean.mat=mean(mat,na.rm=TRUE),
+         cor.mat.dh=cor(dh,mat,use="complete.obs")) |>
+  filter(dh>quantile(dh,probs = 0.01,na.rm=TRUE)) |> filter(dh<quantile(dh,probs=0.99,na.rm=TRUE)) |> 
+  filter(dh>(-2000)) |> 
+  filter(!is.na(margin.temp)) |> 
+  # filter(!is.na(margin.temp)&!is.na(margin.deficit)) |>
+  # ungroup() |> group_by(species,margin.temp) |> 
+  mutate(dh_old=dh,
+         dh=scale(dh),
+         dh2=dh^2) |> 
+  ungroup() |> 
+  mutate(ISP=fecGmMu/BA,
+         s_ISP=fecGmSd/(BA^2))|> 
+  filter(!is.na(ISP)) |> 
+  filter(!is.na(dh))
+
+folder="mod_ancova_species2/"
+out_ancova_species=sp.ancova |> 
+  dplyr::select(species,zone,mean.dh,mean.mat,cor.mat.dh) |> 
+  mutate(Mid=NA,
+         Cold=NA,
+         Hot=NA,
+         dh=NA,
+         Cold.dh=NA,
+         Hot.dh=NA) |> 
+  unique() 
+# sp=out_ancova_species$species[1]
+for (sp in out_ancova_species$species){
+  print(sp)
+  # filter data
+  mid_isp<-sp.ancova |> 
+    filter(species==sp) |> 
+    # group_by(margin.temp) |> 
+    summarise(mid_isp=median(ISP)[[1]]) |> 
+    # filter(margin.temp=="midtemp") |>
+    ungroup() |> 
+    pull(mid_isp)
+  sp.mod=sp.ancova |> 
+    filter(species==sp) |> 
+    mutate(dISP=ISP/mid_isp)
+  
+  if(file.exists(paste0(folder,"ancova_",sp,"_lin.RData"))){
+    load(paste0(folder,"ancova_",sp,"_lin.RData"))
+  }else{
+    X=model.matrix(~margin.temp, sp.mod)
+    data_zone=list(N=dim(sp.mod)[1],
+                   NX=ncol(X),
+                   ISP=sp.mod$dISP,
+                   X=X,
+                   NULL)
+    fit.ancova_lin <- stan(file = "lmm_species.stan",
+                       data=data_zone,
+                       iter=1000,
+                       chains=3,
+                       core=3,
+                       include=FALSE,
+                       pars=c("beta_raw"))
+    save(fit.ancova_lin,file=paste0(folder,"ancova_",sp,"_lin.RData"))    
+  }
+  
+  summary.fit=summary(fit.ancova_lin)$summary  
+  # rownames(summary.fit)[2:7]=c("Mid","Cold","Hot","dh","Cold.dh","Hot.dh")
+  rownames(summary.fit)[1:3]=c("Mid","Cold","Hot")
+  
+  out_ancova_species[out_ancova_species$species==sp,
+                     c("Mid","Cold","Hot")]= #,"dh",Cold.dh","Hot.dh"
+    t(summary.fit[c("Mid","Cold","Hot"),"mean"]) #,"Cold","Hot","dh","Cold.dh","Hot.dh"
+}
+
+out_ancova_species |> 
+  pivot_longer(cols=c("mean.mat","mean.dh","cor.mat.dh"),
+               names_to = "clim",
+               values_to = "clim_var") |> 
+  pivot_longer(cols=c("Mid","Cold","Hot"), #"Cold","Hot","dh","Cold.dh","Hot.dh"
+               names_to="pars",
+               values_to = "pars_val") |> 
+  ggplot(aes(clim_var,pars_val,color=pars))+
+  geom_point()+
+  geom_smooth(method="lm")+
+  facet_wrap(~clim,scales="free")
+
+
+out_ancova_species |> 
+  pivot_longer(cols=c("Mid","Cold","Hot"), #"Cold","Hot","dh","Cold.dh","Hot.dh"
+               names_to="pars",
+               values_to = "pars_val") |> 
+  ggplot(aes(mean.mat,pars_val,color=zone))+
+  geom_point()+
+  geom_boxplot(aes(20,pars_val,color=zone),position=position_dodge(width=2),outlier.colour = NA)+
+  geom_smooth(method="lm")+
+  facet_wrap(~pars,scales="free")
+
+out_ancova_species |> 
+  left_join(phylo.select) |> 
+  # filter(taxa=="angiosperm") |> 
+  mutate(zone=factor(str_to_title(zone),levels=c("West","East","Europe"))) |> 
+  # filter(zone=="East") |>
+  # filter(!species%in%c("pinusPinea","quercusIlex")) |> 
+  select(zone,taxa,species,Mid,Cold,Hot,Hot.dh,mean.mat,mean.dh,cor.mat.dh) |> 
+  rename(`Mean MAT`="mean.mat",
+         `Mean DH`="mean.dh") |> 
+  pivot_longer(cols=c("Mean MAT","Mean DH","cor.mat.dh"),
+               names_to = "clim",
+               values_to = "clim_var") |> 
+  pivot_longer(cols=c("Mid","Cold","Hot"),
+               names_to="pars",
+               values_to = "pars_val") |> 
+  filter(clim!="cor.mat.dh") |> 
+  ggplot(aes(clim_var,pars_val,color=pars))+
+  geom_point()+
+  geom_smooth(aes(color=pars),method="lm",se = FALSE)+
+  facet_grid(zone~clim,scales="free")+
+  scale_color_manual(values=c("steelblue1","firebrick1","bisque2"))-> p
+
+out_ancova_species |> 
+  left_join(phylo.select) |> 
+  # filter(taxa=="angiosperm") |> 
+  mutate(zone=factor(str_to_title(zone),levels=c("West","East","Europe"))) |> 
+  # filter(zone=="East") |>
+  # filter(!species%in%c("pinusPinea","quercusIlex")) |> 
+  select(zone,taxa,species,Mid,Cold,Hot,Hot.dh,mean.mat,mean.dh,cor.mat.dh) |> 
+  rename(`Mean MAT`="mean.mat",
+         `Mean DH`="mean.dh") |> 
+  pivot_longer(cols=c("Cold","Hot"),
+               names_to="pars",
+               values_to = "pars_val") |> 
+  ggplot(aes(`Mean MAT`,pars_val,color=pars))+
+  geom_point()+
+  # geom_smooth(aes(color=pars),method="lm",se = FALSE)+
+  facet_grid(~zone,scales="free")+
+  scale_color_manual(values=c("steelblue1","firebrick1"))->p
+ggsave( p,
+        filename = "bes_fig/nichemat.png",
+        dpi = 600,
+        width = 29,
+        height=10,
+        units = "cm")
+
+
+out_ancova_species |> 
+  left_join(phylo.select) |> 
+  ggplot(aes(mean.mat,mean.dh,color=zone,shape=taxa))+
+  geom_smooth(aes(shape=NULL))+
+  geom_point(method="gam")
+```
+
+# Does the effect of temperature in margins is conserved among continent for identical genus?
+
+```{r fitgenus}
+sp.data=rbind(fecundity.eu_clim |> mutate(block="europe"),
+              fecundity.am_clim|> mutate(block="america")) |>
+  filter(BA!=0) |> dplyr::select(species) |> unique() |> pull()
+
+genus.com<-phylo.select |> filter(species %in% sp.data) |> dplyr::select(genus,zone) |> unique() |> 
+  group_by(genus) |> 
+  summarise(nsp=n()) |> 
+  filter(nsp==3) |> 
+  pull(genus)
+
+
+sp.genus=rbind(fecundity.eu_clim |> mutate(block="europe"),
+                fecundity.am_clim|> mutate(block="america")) |>
+  left_join(phylo.select) |> 
+  dplyr::select(plot,lon,lat,genus,species,BA,fecGmMu,fecGmSd,sgdd,wai,pet,map,mat,block,zone) |> 
+  filter(genus %in% genus.com) |> 
+  filter(BA!=0) |> #rm absences
+  mutate(dh=12*pet-map) |> 
+  group_by(species) |> 
+  # compute weighted quantiles of sgdd and wai, and correlation between wai and sgdd
+  mutate(margin.temp=case_when(mat<=weighted.quantile(mat,w=BA, prob=0.1)[[1]]~"cold",
+                               mat<weighted.quantile(mat,w=BA, prob=0.55)[[1]]&
+                                 mat>weighted.quantile(mat,w=BA, prob=0.45)[[1]]~"midtemp",
+                               mat>=weighted.quantile(mat,w=BA, prob=0.9)[[1]]~"hot"),
+         margin.temp=factor(margin.temp,levels=c("midtemp","cold","hot"))
+  ) |>
+  filter(dh>quantile(dh,probs = 0.01,na.rm=TRUE)) |> filter(dh<quantile(dh,probs=0.99,na.rm=TRUE)) |> 
+  filter(!is.na(margin.temp)) |> 
+  # filter(!is.na(margin.temp)&!is.na(margin.deficit)) |>
+  ungroup() |> group_by(genus) |> 
+  mutate(dh_old=dh,
+         dh=scale(dh),
+         dh2=dh^2) |> 
+  ungroup() |> 
+  mutate(ISP=fecGmMu/BA,
+         s_ISP=fecGmSd/(BA^2))|> 
+  filter(!is.na(ISP)) |> 
+  filter(!is.na(dh))
+
+folder="mod_ancova_genus_2/"
+out_ancova=sp.genus |> 
+  mutate(fit=NA,
+         quant05=NA,
+         quant95=NA,
+         mean=NA) |> 
+  slice(0)
+for(g in genus.com){
+  print(g)
+  for (z in c("europe","east","west")){
+    print(z)
+    # filter data
+    sp.mod=sp.genus |> 
+      filter(genus==g) |> 
+      filter(zone==z)
+      
+    if(file.exists(paste0(folder,"ancova_",z,"_",g,".RData"))){
+      load(paste0(folder,"ancova_",z,"_",g,".RData"))
+    }else{
+      X=model.matrix(~margin.temp*dh+margin.temp*dh2, sp.mod)
+      data_zone=list(N=dim(sp.mod)[1],
+                     NX=ncol(X),
+                     S=nlevels(as.factor(sp.mod$species)),
+                     species=as.numeric(as.factor(sp.mod$species)),
+                     ISP=sp.mod$ISP,
+                     X=X,
+                     NULL)
+      fit.ancova <- stan(file = "lmm_ancova.stan",
+                         data=data_zone,
+                         iter=1000,
+                         chains=3,
+                         core=3,
+                         include=FALSE,
+                         pars=c("beta_raw"))
+      save(fit.ancova,file=paste0(folder,"ancova_",z,"_",g,".RData"))
+    }
+    if(file.exists(paste0(folder,"ancova_",z,"_",g,"_lin.RData"))){
+      load(paste0(folder,"ancova_",z,"_",g,"_lin.RData"))
+    }else{
+      X=model.matrix(~margin.temp*dh, sp.mod)
+      data_zone=list(N=dim(sp.mod)[1],
+                     NX=ncol(X),
+                     S=nlevels(as.factor(sp.mod$species)),
+                     species=as.numeric(as.factor(sp.mod$species)),
+                     ISP=sp.mod$ISP,
+                     X=X,
+                     NULL)
+      fit.ancova_lin <- stan(file = "lmm_ancova.stan",
+                             data=data_zone,
+                             iter=1000,
+                             chains=3,
+                             core=3,
+                             include=FALSE,
+                             pars=c("beta_raw"))
+      save(fit.ancova_lin,file=paste0(folder,"ancova_",z,"_",g,"_lin.RData"))    
+    }
+    
+    bic_quad=-2*summary(fit.ancova)$summary["lp__","mean"]+8*dim(sp.mod)[1]
+    bic_lin=-2*summary(fit.ancova_lin)$summary["lp__","mean"]+5*dim(sp.mod)[1]
+    
+    if(bic_quad<bic_lin){
+      fit=fit.ancova
+      X=model.matrix(~margin.temp*dh+margin.temp*dh2, sp.mod)
+    }else{
+      fit=fit.ancova_lin
+      X=model.matrix(~margin.temp*dh, sp.mod)
+    }
+    
+    posteriors_fec<-as.data.frame(fit.ancova) |>
+      dplyr::select(!matches("beta_")) |>
+      dplyr::select(matches("beta"))
+    colnames(posteriors_fec)[1:ncol(X)]=colnames(X)
+    speciescode=sp.mod |> ungroup()|> dplyr::select(species) |> mutate(code=as.numeric(as.factor(species))) |> unique()
+    speciesranef=as.data.frame(summary(fit.ancova)$summary) |> 
+      rownames_to_column(var="parameter") |> 
+      filter(grepl("alpha",parameter)) |> 
+      dplyr::select(parameter,mean) |> 
+      mutate(code=as.numeric(gsub(".*?\\[([^]]*)\\].*", "\\1", parameter))) |> 
+      left_join(speciescode) |> 
+      dplyr::select(species,mean)
+    
+    contrast_mat= X |>  t()
+    contrast_post=as.matrix(posteriors_fec)[,1:ncol(X)] %*% contrast_mat
+    fit=apply(contrast_post,2,median)
+    quant05=apply(contrast_post,2,quantile,probs=0.05)
+    quant95=apply(contrast_post,2,quantile,probs=0.95)
+    
+    output=cbind(sp.mod,
+                 fit=fit,
+                 quant05=quant05,
+                 quant95=quant95) |>
+      left_join(speciesranef) 
+    
+    out_ancova=rbind(out_ancova,
+                     output)
+    rm(output,quant05,quant95,fit,contrast_post,contrast_mat,speciesranef,speciescode,posteriors_fec,data_zone,sp.mod,sp.zone)
+  }
+}
+
+out_ancova |> 
+  ggplot()+
+  geom_line(aes(dh_old,fit,color=margin.temp),size=0.6)+
+  geom_point(aes(dh_old,log(ISP)-mean,color=margin.temp),size=0.6,alpha=0.6)+
+  geom_ribbon(aes(x=dh_old,ymin=quant05,ymax=quant95,fill=margin.temp),alpha=0.8)+
+  scale_fill_manual(values=c("bisque2","steelblue1","firebrick1"))+
+  scale_color_manual(values=c("bisque2","steelblue1","firebrick1"))+
+  facet_grid(genus~zone)
+out_ancova |> 
+  mutate(margin.temp=factor(margin.temp,levels=c("cold","midtemp","hot"))) |> 
+  ggplot()+
+  geom_line(aes(dh_old,fit,color=zone),size=0.6)+
+  geom_point(aes(dh_old,log(ISP)-mean,color=zone),size=0.6,alpha=0.1)+
+  geom_ribbon(aes(x=dh_old,ymin=quant05,ymax=quant95,fill=zone),alpha=0.8)+
+  geom_boxplot(aes(dh_old,y=-10,color=zone),position=position_dodge(width=1),outlier.colour = NA)+
+  # geom_boxplot(aes(x=-2000,y=log(ISP)-mean,color=zone),position=position_dodge(width=100))+
+  scale_fill_manual(values=c("firebrick1","slateblue","firebrick4"))+
+  scale_color_manual(values=c("firebrick1","slateblue","firebrick4"))+
+  theme(axis.text.x = element_text(colour = inferno(6)))+
+  facet_grid(genus~margin.temp)
+
+
+```
+

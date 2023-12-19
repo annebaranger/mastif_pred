@@ -3191,7 +3191,7 @@ plot(terra::slope(fect.rast))
 
 
 ```{r pointposition, eval=FALSE, include=FALSE}
-rbind(fecundity.eu_clim |> mutate(block="europe"),
+rbind(fecundity.eu_clim |> mutate(block="europe"), 
                  fecundity.am_clim|> mutate(block="america")) |>
   filter(BA!=0) |> #rm absences
   # filter(ISP<quantile(ISP,probs=0.97)) |>  # remove extreme values
