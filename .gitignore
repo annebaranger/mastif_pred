@@ -10,3 +10,11 @@ target_*
 *.png
 *.RData
 *.html
+bes_fig/
+figure/
+mod_ancova*
+*.pdf
+*.pptx
+ReadNFICanada.R
+formatEuropeNFI.R
+R/Fundiv/
