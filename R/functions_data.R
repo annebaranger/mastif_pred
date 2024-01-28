@@ -408,6 +408,152 @@ class_species <- function(fecundity.am_clim,
   return(species_cat)
 }
 
+#' Get temporal variability
+#'@description uses timeseries of fecundity to compute wieghted mean, weighted variance
+#'and subsequent coefficient of variation of time series
+#'@param continent
+#'@param sp.select
+
+get_cv <- function(continent,
+                   sp.select){
+  # get years
+  filename=list.files(paste0("data/",continent))
+  year=as.numeric(sub(".*-(\\d+)\\.rdata", "\\1", filename))
+  year=unique(year[!is.na(year)])
+  
+  # get weights, mu ,sd
+  for (y in year){
+    load(paste0("data/",continent,"/fecGmSd-",y,".rdata"))
+    sd=summary
+    rm(summary)
+    load(paste0("data/",continent,"/fecGmMu-",y,".rdata"))
+    mu=summary
+    rm(summary)
+    assign(paste0("w_",y),
+           mu/sd)
+    assign(paste0("sd_",y),
+           sd)
+    assign(paste0("mu_",y),
+           mu)
+  }
+  rm(mu,sd)
+  w=array(data=unlist(lapply(ls()[grepl( "w_",ls())],
+                             FUN = function(x)eval(parse(text=x)))),
+          dim = c(nrow(w_2010),
+                  ncol(w_2010),
+                  length(ls()[grepl( "w_",ls())])))
+  rm(list=ls()[grepl( "w_",ls())])
+  gc()
+  mu=array(data=unlist(lapply(ls()[grepl( "mu_",ls())],
+                              FUN = function(x)eval(parse(text=x)))),
+           dim = c(nrow(mu_2010),
+                   ncol(mu_2010),
+                   length(ls()[grepl( "mu_",ls())])))
+  rm(list=ls()[grepl( "mu_",ls())])
+  gc()
+  sd=array(data=unlist(lapply(ls()[grepl( "sd_",ls())],
+                              FUN = function(x)eval(parse(text=x)))),
+           dim = c(nrow(sd_2010),
+                   ncol(sd_2010),
+                   length(ls()[grepl( "sd_",ls())])))
+  rm(list=ls()[grepl( "sd_",ls())])
+  gc()
+  # components of weighted mean and var
+  sum_w=apply(w,
+              MARGIN=c(1,2),
+              sum,
+              na.rm=TRUE)
+  sum_w2=apply(w*w,
+               MARGIN=c(1,2),
+               sum,
+               na.rm=TRUE)
+  var_mu=apply(mu,
+               MARGIN=c(1,2),
+               var,
+               na.rm=TRUE)
+  mu_w=apply(mu*w,
+             MARGIN=c(1,2),
+             sum,
+             na.rm=TRUE)
+  
+  # weighted mean and var
+  mu_weigthed=mu_w/sum_w
+  var_weighted=(var_mu*sum_w2)/(sum_w^2)
+  
+  # coef of var
+  cv=sqrt(var_weighted)/mu_weigthed
+  
+  # volatility
+  load(paste0("data/",continent,"/fecGmSd-",y,".rdata"))
+  mu_0=mu[,colnames(summary)%in%sp.select,]
+  mu_0[is.na(mu_0)]=0
+  volatility<-apply(mu_0,
+                    MARGIN = c(1,2),
+                    function(y){
+                      if(sum(y)==0){return(0)}else{
+                      mastSpectralDensity(log(y+1),maxPeriod = 6,PLOT=FALSE)$volatility}
+                      }
+                    )
+  colnames(volatility)=colnames(summary)[colnames(summary)%in%sp.select]
+  rownames(volatility)<-rownames(summary)
+  
+
+  
+  # get data together
+  colnames(mu_weigthed)<- colnames(summary)
+  rownames(mu_weigthed)<-rownames(summary)
+  colnames(var_weighted)<- colnames(summary)
+  rownames(var_weighted)<-rownames(summary)
+  colnames(cv)<- colnames(summary)
+  rownames(cv)<-rownames(summary)
+  
+  mu_weigthed<-as.data.frame(mu_weigthed)|> 
+    rownames_to_column(var="plot") |> 
+    dplyr::select(plot,matches(sp.select)) |> 
+    pivot_longer(cols=-plot,
+                 names_to = "species",
+                 values_to = "fecGmMuW")
+  var_weighted<-as.data.frame(var_weighted)|> 
+    rownames_to_column(var="plot") |> 
+    dplyr::select(plot,matches(sp.select)) |> 
+    pivot_longer(cols=-plot,
+                 names_to = "species",
+                 values_to = "fecGmVarW")
+  cv<-as.data.frame(cv)|> 
+    rownames_to_column(var="plot") |> 
+    dplyr::select(plot,matches(sp.select)) |> 
+    pivot_longer(cols=-plot,
+                 names_to = "species",
+                 values_to = "fecGmCv")
+  volatility<-as.data.frame(volatility)|> 
+    rownames_to_column(var="plot") |> 
+    pivot_longer(cols=-plot,
+                 names_to = "species",
+                 values_to = "volatility")
+  
+  
+  
+  fecundity_cv<-mu_weigthed |> 
+    left_join(var_weighted,by=c("plot","species")) |> 
+    left_join(cv,by=c("plot","species")) |> 
+    left_join(volatility,by=c("plot","species")) |> 
+    mutate(fecGmMuW=na_if(fecGmMuW,0),
+           fecGmMuW=na_if(fecGmMuW,NaN),
+           fecGmVarW=na_if(fecGmVarW,0),
+           fecGmVarW=na_if(fecGmVarW,NaN),
+           fecGmCv=na_if(fecGmCv,0),
+           fecGmCv=na_if(fecGmCv,NaN),
+           volatility=na_if(volatility,0),
+           volatility=na_if(volatility,NaN)) |> 
+    group_by(species) |> 
+    mutate(n=sum(fecGmMuW>0,na.rm=TRUE)) |> filter(n>200) |> 
+    filter(species %in% sp.select) |> 
+    dplyr::select(-n)
+  
+  return(fecundity_cv)
+  }
+
+
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 #### Section 3 - Traits compilation ####
 #' @authors Anne Baranger, Julien Barrère (INRAE - LESSEM)

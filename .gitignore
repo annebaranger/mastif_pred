@@ -18,3 +18,5 @@ mod_ancova*
 ReadNFICanada.R
 formatEuropeNFI.R
 R/Fundiv/
+R/draft/
+model/

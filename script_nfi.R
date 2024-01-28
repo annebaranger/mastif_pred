@@ -8,7 +8,7 @@ library(targets)
 #Options
 source("R/functions_data.R")
 options(tidyverse.quiet = TRUE)
-tar_option_set(packages = c("stringr","ggplot2","tidyr","dplyr","terra","factoextra","modi","tibble"),
+tar_option_set(packages = c("stringr","ggplot2","tidyr","dplyr","terra","factoextra","modi","tibble","mastif"),
                error = "continue") 
 
 mastif.eu=tar_read(mastif.eu,store = "target_data")
@@ -90,6 +90,18 @@ list(
                   sp.select.am)
   ),
   
+  # fecundity cv
+  tar_target(
+    cv.eu,
+    get_cv(continent="europe",
+           sp.select.eu)
+  ),
+  tar_target(
+    cv.am,
+    get_cv(continent="america",
+           sp.select.am)
+  ),
+  
   # fecundity margin
   tar_target(
     sp.margin.eu,
@@ -106,22 +118,14 @@ list(
   tar_target(
     fecundity.eu_clim,
     fec.eu |> 
-      left_join(nfi.eu_clim$df.nfi.clim)|> 
-      left_join(sp.margin.eu) |> 
-      mutate(margin=case_when(PC1<quant05~"low",
-                              PC1>quant475&PC1<quant525~"opt",
-                              PC1>quant95~"up",
-                              TRUE~NA))
+      left_join(cv.eu,by=c("plot","species")) |> 
+      left_join(nfi.eu_clim$df.nfi.clim)
   ),
   tar_target(
     fecundity.am_clim,
     fec.am |> 
-      left_join(nfi.am_clim$df.nfi.clim)|> 
-      left_join(sp.margin.am) |> 
-      mutate(margin=case_when(PC1<quant05~"low",
-                              PC1>quant475&PC1<quant525~"opt",
-                              PC1>quant95~"up",
-                              TRUE~NA))
+      left_join(cv.am,by=c("plot","species")) |> 
+      left_join(nfi.am_clim$df.nfi.clim)
   ),
   tar_target(
     species_class,

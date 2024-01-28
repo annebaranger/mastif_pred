@@ -6,6 +6,7 @@
 #' @name functions_plot.R  
 #' @description R script containing all functions relative to data
 #               visualisation
+#' @author Julien Barrere
 #
 #
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%

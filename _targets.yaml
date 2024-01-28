@@ -7,3 +7,6 @@ data_gbif:
 data_nfi:
   script: script_nfi.R
   store: target_nfi
+fit:
+  script: script_fit.R
+  store: target_fit
