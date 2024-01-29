@@ -31,23 +31,13 @@ theme_set(theme_minimal()) # ggplot theme
 tar_load(species_selection,store="target_nfi")
 
 ## species selection ##
-tar_load(phylo.select,store="target_nfi")
+# tar_load(phylo.select,store="target_nfi")
 
 tar_load(sp.select.eu,store="target_nfi")
 tar_load(sp.select.am,store="target_nfi")
 tar_load(species_class,store="target_nfi")
-phylo.select<-phylo.select |> left_join(species_class) |> 
-  mutate(zone=case_when(species=="abiesCephalon"~"europe",
-                        species=="acerCircinat"~"west",
-                        species=="acerSpicatum"~"east",
-                        species=="amelanchArborea"~"east",
-                        species=="asiminaTriloba"~"east",
-                        species=="cedrusAtlantic"~"europe",
-                        species=="frangulaAlnus"~"europe",
-                        species=="linderaBenzoin"~"east",
-                        TRUE~zone)) 
-  
-
+tar_load(species.biome,store="target_fit")
+tar_load(fecundity.fit.1,store="target_fit")
 
 # small format of gbif
 df.gbif.short <- species_selection$df.gbif |>
@@ -258,6 +248,7 @@ p<-fecundity.fit.1 |>
         legend.position = "bottom")+
   ggtitle("10 % of NFI plots")+
   scale_fill_continuous(type="viridis",trans="sqrt",breaks=c(1,100,1000,5000))
+p
 # ggsave( p,
 #         filename = "bes_fig/NFIPlot.png",
 #         dpi = 600,
@@ -269,7 +260,7 @@ p<-fecundity.fit.1 |>
 # plots by biogeographical zone
 p<-fecundity.fit.1 |> 
   filter(dh>=(-2000)) |> 
-  dplyr::select(species,lat,lon,dh,mat) |> 
+  dplyr::select(zone,species,lat,lon,dh,mat) |> 
   unique() |>
   mutate(zone=factor(zone,levels=c("west","east","europe"))) |> 
   sample_frac(0.1) |>
@@ -286,6 +277,7 @@ p<-fecundity.fit.1 |>
   scale_fill_continuous(type="viridis",trans="sqrt",breaks=c(1,100,1000,5000))+
   scale_color_manual(values=c("firebrick4","firebrick1","slateblue"))+
   labs(color="Biogeographical zone")
+p
 # ggsave( p,
 #         filename = "bes_fig/BiogeoPlot.png",
 #         dpi = 600,
@@ -310,7 +302,7 @@ fecundity.fit.1 |>
   xlim(-135,-90) + 
   ylim(27,73)+
   theme_minimal()+
-  stat_ellipse(aes(x=lon,y=lat,color=species))
+  stat_ellipse(aes(x=lon,y=lat,color=species))+
   theme(axis.title = element_blank(),
         axis.text = element_blank(),
         legend.position = "bottom")+
@@ -675,6 +667,7 @@ fecundity.fit.1 |>
   labs(color="Temperature margins :",
        x="Mean annual temperature (°C)",
        y="Water deficit (mm)")->p
+
 p
 # ggsave( p,
 #         filename = "bes_fig/SpCorEx.png",
@@ -711,7 +704,7 @@ ggsave( p,
 ## Effect of aridity gradient in species margins on fecundity, for species with low correlation between mat & dh
 
 ```{r ariditygrad}
-tar_load(fitcontinentcontinous)
+tar_load(fitcontinentcontinous,store="target_fit")
 out_ancova_cont=fitcontinentcontinous$posterior
 out_ancova_cont |> 
   mutate(zone=factor(str_to_title(zone),levels=c("West","East","Europe")),
@@ -766,7 +759,7 @@ out_ancova_cont |>
        x="Water deficit (mm, centered by species)",
        color="Biogeographical zone",
        fill="Biogeographical zone")->p
-
+p
 out_ancova_cont |> 
   mutate(zone=factor(zone,levels=c("west","east","europe")),
          margin.temp=factor(margin.temp,levels=c("cold","midtemp","hot"))) |>
@@ -786,32 +779,15 @@ out_ancova_cont |>
 ## Effect of aridity gradient in species margins on fecundity, difference between taxa, for species with low correlation between mat & dh
 
 ```{r ariditygrad}
-sp.ancova=rbind(fecundity.eu_clim |> mutate(block="europe"),
-                fecundity.am_clim|> mutate(block="america")) |>
-  left_join(phylo.select) |> 
-  dplyr::select(plot,lon,lat,species,taxa,BA,fecGmMu,fecGmSd,sgdd,wai,pet,map,mat,block,zone) |> 
-  filter(BA!=0) |> #rm absences
-  mutate(dh=12*pet-map) |> 
+sp.ancova=fecundity.fit.1|> 
   filter(dh>(-2000)) |>
-  group_by(species) |> 
-  # compute weighted quantiles of sgdd and wai, and correlation between wai and sgdd
-  mutate(margin.temp=case_when(mat<=weighted.quantile(mat,w=BA, prob=0.1)[[1]]~"cold",
-                               mat<weighted.quantile(mat,w=BA, prob=0.55)[[1]]&
-                                 mat>weighted.quantile(mat,w=BA, prob=0.45)[[1]]~"midtemp",
-                               mat>=weighted.quantile(mat,w=BA, prob=0.9)[[1]]~"hot"),
-         margin.temp=factor(margin.temp,levels=c("midtemp","cold","hot"))
-         ) |>
   # filter(dh>quantile(dh,probs = 0.01,na.rm=TRUE)) |> filter(dh<quantile(dh,probs=0.99,na.rm=TRUE)) |> 
   filter(!is.na(margin.temp)) |> 
-  # filter(!is.na(margin.temp)&!is.na(margin.deficit)) |>
-  # ungroup() |> group_by(species,margin.temp) |> 
+  group_by(species) |> 
   mutate(dh_old=dh,
          dh=scale(dh,center=TRUE,scale=FALSE),
          dh2=dh^2) |> 
   ungroup() |> 
-  mutate(ISP=fecGmMu/BA,
-         s_ISP=fecGmSd/(BA^2))|> 
-  filter(!is.na(ISP)) |> 
   filter(!is.na(dh))
 mid_isp<-sp.ancova |> 
     group_by(species) |> 
@@ -1176,6 +1152,7 @@ fitspecies |>
 
 ## Model by biome 
 
+### Continuous
 ```{r}
 tar_load(fitbiomecontinuous,store="target_fit")
 fitbiomecontinuous |> 
@@ -1269,19 +1246,43 @@ fitbiomecontinuous |>
   ggplot(aes(mat,color=species))+
   geom_density()
 ```
-
+### Discrete
 
 ```{r}
-cbind(fec_tot,
-      biome=points_biome$BIOME) |> 
-  group_by(species) |> 
-  # compute weighted quantiles of sgdd and wai, and correlation between wai and sgdd
-  mutate(margin.temp=case_when(mat<=weighted.quantile(mat,w=BA, prob=0.1)[[1]]~"cold",
-                               mat<weighted.quantile(mat,w=BA, prob=0.55)[[1]]&
-                                 mat>weighted.quantile(mat,w=BA, prob=0.45)[[1]]~"midtemp",
-                               mat>=weighted.quantile(mat,w=BA, prob=0.9)[[1]]~"hot"),
-         margin.temp=factor(margin.temp,levels=c("midtemp","cold","hot"))
-  ) |> 
+tar_load(fitbiomediscrete,store="target_fit")
+
+fitbiomediscrete |> 
+  mutate(margin.temp=factor(margin.temp,levels=c("cold","midtemp","hot")),
+         margin.deficit=factor(margin.deficit,levels=c("humid","midhum","arid")),
+         biome=case_when(biome==4~"Temperate deciduous",
+                         biome==5~"Temperate coniferous",
+                         biome==6~"Boreal",
+                         biome==8~"Temperate Grasslands",
+                         biome==12~"Mediteranean",
+                         biome==13~"Desert")) |> 
+  # filter(biome!="prairial") |>
+  filter(margin.temp!="midtemp") |>
+  group_by(biome) |> 
+  mutate(n_sp=n_distinct(species)) |> ungroup() |> 
+  mutate(biome=paste0(biome," (n species = ",n_sp,")")) |> 
+  ggplot(aes(margin.temp,fit,fill=margin.deficit,color=margin.deficit))+
+  geom_boxplot(outlier.colour = NA)+
+  geom_hline(yintercept = 0,color="grey")+
+  scale_fill_manual(values=c("steelblue1","bisque2","firebrick1"))+
+  scale_color_manual(values=c("steelblue1","bisque2","firebrick1"))+
+  facet_wrap(~biome, ncol = 2)+
+  theme(legend.position="bottom")+
+  labs(fill="",
+       color="",
+       x="",
+       y="Log ratio of fecundity relative to the species mean")->fig
+fig
+```
+
+
+### Explo
+```{r}
+fecundity.fit.1 |> 
   filter(biome==5) ->test 
 test |>
   ggplot(aes(map,mat,color=margin.temp))+geom_point()+
@@ -1302,7 +1303,7 @@ test |>
   ylim(c(25,60))+
   scale_color_gradientn(colours = viridis(15))
 
-out_anova_biome |> 
+fitbiomecontinuous |> 
   filter(dh>(-500)) |> 
   filter(biome==5) |> 
   ggplot(aes(dh,log(dISP)-mean,color=margin.temp))+
@@ -1346,6 +1347,7 @@ test |>
   theme(axis.title = element_blank(),
         legend.position="bottom")->b
 fig=cowplot::plot_grid(a,b)
+fig
 # ggsave(fig,
 #      filename = "ConiferousBiome.png",
 #       dpi = 600,
@@ -1354,7 +1356,7 @@ fig=cowplot::plot_grid(a,b)
 #       units = "cm")
 
 
-fec_tot |> 
+fecundity.fit.1 |> 
   group_by(plot) |> 
   summarise(ba_tot=sum(BA))->batot  
   # filter(margin.temp=="hot") |>
@@ -1362,7 +1364,7 @@ fec_tot |>
   # ggplot(aes(ba_tot,fecGmMu))+
   # geom_point()+
   # geom_smooth()
-out_anova_biome |> 
+fitbiomecontinuous |> 
   left_join(batot) |> 
   filter(margin.temp=="hot") |>
   filter(ba_tot<200) |> 
@@ -1371,7 +1373,7 @@ out_anova_biome |>
   geom_point()+
   geom_smooth()
 
-out_anova_biome |> 
+fitbiomecontinuous |> 
   left_join(batot) |> 
   filter(margin.temp=="hot") |>
   filter(ba_tot<200) |> 
@@ -1401,7 +1403,7 @@ out_anova_biome |>
 #         height=12,
 #         units = "cm")
 
- out_anova_biome |> 
+ fitbiomecontinuous |> 
   group_by(species) |> 
   mutate(margin.deficit=case_when(dh<weighted.quantile(dh,w=BA, prob=0.05)[[1]]~"humid",
                               dh<weighted.quantile(dh,w=BA, prob=0.525)[[1]]&
@@ -1418,32 +1420,29 @@ out_anova_biome |>
   geom_smooth(aes(color=NULL),method="loess")+
   facet_wrap(~biome)
 
-fec_tot |> 
+fecundity.fit.1 |> 
   left_join(batot) |> 
   # filter(margin.temp%in%c("hot","cold")) |>
   group_by(species) |> 
-  mutate(margin.temp=case_when(mat<=weighted.quantile(mat,w=BA, prob=0.1)[[1]]~"cold",
-                               mat<weighted.quantile(mat,w=BA, prob=0.55)[[1]]&
-                                 mat>weighted.quantile(mat,w=BA, prob=0.45)[[1]]~"midtemp",
-                               mat>=weighted.quantile(mat,w=BA, prob=0.9)[[1]]~"hot"),
-         margin.deficit=case_when(dh<weighted.quantile(dh,w=BA, prob=0.05)[[1]]~"humid",
+  mutate(margin.deficit=case_when(dh<weighted.quantile(dh,w=BA, prob=0.05)[[1]]~"humid",
                               dh<weighted.quantile(dh,w=BA, prob=0.525)[[1]]&
                                  dh>weighted.quantile(dh,w=BA, prob=0.475)[[1]]~"midhum",
                                dh>weighted.quantile(dh,w=BA, prob=0.95)[[1]]~"arid")) |> 
   ungroup() |> 
   filter(ba_tot<200) |>
-  left_join(sp_biome) |> 
+  select(-biome) |> 
+  left_join(species.biome) |> 
   filter(biome%in%c(4,5,6,12)) |> 
   filter(margin.deficit%in%c("arid","humid")) |>
   filter(margin.temp%in%c("hot","cold")) |>
   ggplot(aes(margin.deficit,log(ba_tot),color=margin.deficit))+
   geom_boxplot(outlier.colour = NA)+
-  geom_signif(comparisons = list(c("arid","humid")),
+  ggpubr::geom_signif(comparisons = list(c("arid","humid")),
               map_signif_level = TRUE,
               y_position = c(4, 4))+
   facet_grid(~biome)
 
-fec_biome |> 
+fecundity.fit.1 |> 
   group_by(species) |> 
   # compute weighted quantiles of sgdd and wai, and correlation between wai and sgdd
   mutate(margin.temp=case_when(mat<=weighted.quantile(mat,w=BA, prob=0.1)[[1]]~"cold",
@@ -1458,7 +1457,7 @@ fec_biome |>
   geom_density()
 
 
-fec_tot |> 
+fecundity.fit.1 |> 
   left_join(batot) |> 
   # filter(margin.temp%in%c("hot","cold")) |>
   group_by(species) |> 
@@ -1472,7 +1471,8 @@ fec_tot |>
                                dh>weighted.quantile(dh,w=BA, prob=0.95)[[1]]~"arid")) |> 
   ungroup() |> 
   filter(ba_tot<200) |>
-  left_join(sp_biome) |> 
+  select(-biome) |> 
+  left_join(species.biome) |> 
   filter(biome%in%c(4,5,6,12)) |> 
   select(species,biome,ba_tot,lon,lat,margin.temp,zone,dh,mat) |> 
   filter(margin.temp%in%c("hot","cold")) |> 
@@ -1482,7 +1482,7 @@ fec_tot |>
   geom_smooth(method="gam")+
   facet_wrap(~biome)
 
-out_anova_biome |> 
+fitbiomecontinuous |> 
   group_by(biome) |> 
   mutate(margin.deficit=case_when(dh<weighted.quantile(dh,w=BA, prob=0.005)[[1]]~"humid",
                               dh<weighted.quantile(dh,w=BA, prob=0.525)[[1]]&
@@ -1508,7 +1508,7 @@ out_anova_biome |>
   mutate(logba=log(ba_tot/mean(ba_tot))) |> 
   ggplot(aes(margin.deficit,log(ba_tot),color=margin.deficit))+
   geom_boxplot(outlier.colour = NA)+
-  geom_signif(comparisons = list(c("arid","humid")),
+  ggpubr::geom_signif(comparisons = list(c("arid","humid")),
               map_signif_level = TRUE,
               y_position = c(4, 4))+
   facet_wrap(~biome)
@@ -1516,7 +1516,7 @@ out_anova_biome |>
 ```
 
 
-```{r}
+```{r eval=FALSE, include=FALSE}
 test.lm=test |> 
   filter(!is.na(margin.temp)) |> 
   left_join(batot) |> 
@@ -2019,7 +2019,9 @@ model_data=model_data |>
               values_from = estimate) |> 
   crossing(mat.pred=seq(-10,25,0.1)) |> 
   filter((mat.pred>min.mat)&(mat.pred<max.mat)) |> 
-  mutate(pred.isp=`(Intercept)`+mat.pred*med.mat)
+  mutate(pred.isp=`(Intercept)`+mat.pred*med.mat) |> 
+  mutate(margin.temp=case_when(margin.temp=="hot"~"Hot",
+                               margin.temp=="cold"~"Cold"))
 ```
 
 
@@ -2032,6 +2034,8 @@ plt<-fitspecies |>
                                  dh>weighted.quantile(dh,w=BA, prob=0.475)[[1]]~"midhum",
                                dh>weighted.quantile(dh,w=BA, prob=0.95)[[1]]~"arid")) |> 
   filter(margin.temp%in%c("cold","hot"))|> # &margin.deficit=="arid" 
+  mutate(margin.temp=case_when(margin.temp=="hot"~"Hot",
+                               margin.temp=="cold"~"Cold")) |> 
   group_by(zone,species,margin.temp) |> 
   summarise(med.ISP=weighted.quantile(fit,w=1/(quant95-quant05), prob=0.5)[[1]],
             mean.ISP=mean(fit),
@@ -2046,21 +2050,34 @@ plt<-fitspecies |>
   geom_hline(yintercept = 0,color="gray12")+
   geom_vline(xintercept = 0,color="gray12")+
   # xlim(c(-3000,1500))+
-  # ylim(c(-3,3))+ # points out of range
+  ylim(c(-3,3))+ # points out of range
   theme(legend.position = "none",
-        axis.text.y = element_text(colour = "white"))+
+        axis.text.y = element_text(colour = "white"),
+        title = element_text(size =12),
+        strip.text = element_text(size =10),
+        axis.title =  element_text(size=10),
+        axis.text =  element_text(size=10),
+        legend.text = element_text(size=10))+
   scale_color_manual(values=c("firebrick1","slateblue","firebrick4"))+
   labs(title="Species ",
        y="",
        x="Mean annual temperature")+
   facet_wrap(~margin.temp,nrow = 2)
+
 bowp<-fitcontinentdiscrete |>
   filter(margin.temp%in%c("hot","cold")) |>
+  mutate(margin.temp=case_when(margin.temp=="hot"~"Hot",
+                               margin.temp=="cold"~"Cold")) |>
   ggplot(aes(1,posterior,color=zone))+
   geom_boxplot(outlier.colour = NA)+
   scale_color_manual(values=c("firebrick4","firebrick1","slateblue"))+
   theme(legend.position = "left",
-        axis.text.x = element_text(colour = "white"))+
+        axis.text.x = element_text(colour = "white"),
+        title = element_text(size =12),
+        strip.text = element_text(size =10),
+        axis.title =  element_text(size=10),
+        axis.text =  element_text(size=10),
+        legend.text = element_text(size=10))+
   ylim(c(-3,3))+
   geom_hline(yintercept = 0,color="gray12",type="dashed")+
   labs(x="",
@@ -2068,10 +2085,12 @@ bowp<-fitcontinentdiscrete |>
        title="Continent")+
   facet_wrap(~margin.temp,nrow=2)
 cowplot::plot_grid(bowp,plt,rel_widths = c(1,2))  -> p
+
+p
 ggsave( p,
-        filename = "Respvar.jpg",
+        filename = "fig1.pdf",
         dpi = 600,
-        width = 25,
+        width = 19.5,
         height=15,
         units = "cm")
 
@@ -2282,8 +2301,12 @@ fitbiomecontinuous |>
                                dh>weighted.quantile(dh,w=BA, prob=0.99)[[1]]~"arid")) |> 
   filter(!is.na(margin.deficit)) |> 
   ungroup() |> 
-  mutate(margin.temp=factor(margin.temp,levels=c("cold","midtemp","hot")),
-         margin.deficit=factor(margin.deficit,levels=c("humid","midhum","arid")),
+  mutate(margin.temp=ifelse(margin.temp=="hot","Hot",
+                            ifelse(margin.temp=="cold","Cold","midtemp")),
+         margin.deficit=ifelse(margin.deficit=="humid","Humid",
+                               ifelse(margin.deficit=="arid","Arid","Median")),
+         margin.temp=factor(margin.temp,levels=c("Cold","midtemp","Hot")),
+         margin.deficit=factor(margin.deficit,levels=c("Humid","Median","Arid")),
          biome=case_when(biome==4~"Temperate deciduous",
                          biome==5~"Temperate coniferous",
                          biome==6~"Boreal",
@@ -2294,20 +2317,25 @@ fitbiomecontinuous |>
   filter(margin.temp!="midtemp") |>
   group_by(biome) |> 
   mutate(n_sp=n_distinct(species)) |> ungroup() |> 
-  mutate(biome=paste0(biome," (n species = ",n_sp,")")) |> 
-  ggplot(aes(margin.temp,fit,fill=margin.deficit,color=margin.deficit))+
-  geom_boxplot(outlier.colour = NA)+
+  mutate(biome=paste0(biome,"\n(n species = ",n_sp,")")) |> 
+  ggplot(aes(margin.temp,fit,fill=margin.deficit))+
+  geom_boxplot(outlier.colour = NA,
+               linewidth=0.1)+
   geom_hline(yintercept = 0,color="grey")+
   scale_fill_manual(values=c("steelblue1","bisque2","firebrick1"))+
-  scale_color_manual(values=c("steelblue1","bisque2","firebrick1"))+
+  # scale_color_manual(values=c("steelblue1","bisque2","firebrick1"))+
   facet_wrap(~biome, ncol = 4)+
   theme(legend.position="top",
-        strip.text = element_text(size=12))+
+        strip.text = element_text(size=12),
+        axis.title =  element_text(size=10),
+        axis.text =  element_text(size=10),
+        legend.text = element_text(size=10)
+        )+
   # theme_bw()+
   labs(fill="",
        color="",
        x="",
-       y="Log ratio of fecundity relative to the species mean")->a
+       y="Log ratio of fecundity \n relative to the species mean")->a
 
 
 fecundity.fit.1 |> 
@@ -2316,13 +2344,13 @@ fecundity.fit.1 |>
 
 fitbiomecontinuous |> 
   group_by(biome) |> 
-  mutate(margin.deficit=case_when(dh<weighted.quantile(dh,w=BA, prob=0.005)[[1]]~"humid",
+  mutate(margin.deficit=case_when(dh<weighted.quantile(dh,w=BA, prob=0.005)[[1]]~"Humid",
                               dh<weighted.quantile(dh,w=BA, prob=0.525)[[1]]&
-                                 dh>weighted.quantile(dh,w=BA, prob=0.475)[[1]]~"midhum",
-                               dh>weighted.quantile(dh,w=BA, prob=0.995)[[1]]~"arid")) |> 
+                                 dh>weighted.quantile(dh,w=BA, prob=0.475)[[1]]~"Median",
+                               dh>weighted.quantile(dh,w=BA, prob=0.995)[[1]]~"Arid")) |> 
   ungroup() |> 
   mutate(margin.temp=factor(margin.temp,levels=c("cold","midtemp","hot")),
-         margin.deficit=factor(margin.deficit,levels=c("humid","midhum","arid")),
+         margin.deficit=factor(margin.deficit,levels=c("Humid","Median","Arid")),
          biome=case_when(biome==4~"Temperate deciduous",
                          biome==5~"Temperate coniferous",
                          biome==6~"Boreal",
@@ -2330,29 +2358,42 @@ fitbiomecontinuous |>
                          biome==12~"Mediteranean",
                          biome==13~"Desert")) |> 
   filter(margin.temp=="hot") |>
-  filter(margin.deficit%in%c("arid","humid")) |> 
-  mutate(margin.temp=factor(margin.temp,levels=c("cold","midtemp","hot")),
-         margin.deficit=factor(margin.deficit,levels=c("humid","midhum","arid"))) |> 
+  filter(margin.deficit%in%c("Arid","Humid")) |> 
   left_join(batot) |> 
   group_by(biome,species,margin.deficit) |>
   mutate(med.ba=median(log(ba_tot))) |> ungroup() |> 
   group_by(species) |> 
-  mutate(logba=log(ba_tot/mean(ba_tot))) |> 
-  ggplot(aes(margin.deficit,log(ba_tot),color=margin.deficit))+
-  geom_boxplot(outlier.colour = NA)+
-  ggpubr::geom_signif(comparisons = list(c("arid","humid")),
+  mutate(logba=ba_tot/mean(ba_tot)) |> 
+  ggplot(aes(margin.deficit,ba_tot,fill=margin.deficit))+
+  geom_boxplot(outlier.colour = NA,
+               linewidth=0.1)+
+  ggpubr::geom_signif(comparisons = list(c("Arid","Humid")),
               map_signif_level = TRUE,
-              y_position = c(4, 4),
-              color="black")+
-    scale_color_manual(values=c("steelblue1","firebrick1"))+
+              y_position = c(1.8, 1.8),
+              color="black",
+              textsize = 4)+
+  scale_fill_manual(values=c("steelblue1","firebrick1"))+
   facet_wrap(~biome,ncol=4)+
   theme(legend.position = "none",
-        strip.text = element_blank())+
-  # theme_tufte()+
+        strip.text = element_blank(),
+        axis.text =  element_text(size=10),
+        axis.title =  element_text(size=10))+
+  scale_y_log10()+
+  # ggthemes::theme_tufte()+
   labs(x="",
-       y="Total basal area, logged (m2)")->b
+       y="Total basal area\n (log scale, m2/ha)")->b
 
-cowplot::plot_grid(a,b,rel_heights = c(3,2),nrow = 2)
+
+b
+cowplot::plot_grid(a,b,rel_heights = c(6,6),nrow = 2)->p
+p
+ggsave( p,
+        filename = "fig3.pdf",
+        dpi = 600,
+        width = 19.5,
+        height=15,
+        units = "cm")
+
 ```
 
 
