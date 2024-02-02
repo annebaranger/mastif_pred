@@ -185,6 +185,44 @@ p
 #         height=9,
 #         units = "cm")
 ```
+```{r}
+sp.fig=c("abiesAlba","pinusSylvestr")
+species_selection$df.gbif |> 
+  filter(species %in% sp.fig) |>
+  pivot_wider(names_from = clim,
+              values_from = clim_niche) |> 
+  select(species,!matches(c("rlow","rhigh","range","_l"))) |>
+  pivot_longer(cols=-species) |> 
+  separate(name, into=c("var","quant")) |> 
+  pivot_wider(names_from = quant,
+              values_from = value) |> 
+  mutate(source="gbif")->gbif.sp
+gbif.sp |> select(species,mat.opt,mat.range)
+
+species_selection$df.select |> 
+  filter(species %in% sp.fig) |>
+  select(species,matches(c("mat","tmin","map"))) |>
+  select(!matches(c("rlow","rhigh","range","_l"))) |> 
+  pivot_longer(cols=-species) |> 
+  separate(name, into=c("var","quant")) |> 
+  pivot_wider(names_from = quant,
+              values_from = value) |> 
+  mutate(opt=(high+low)/2) |> 
+  mutate(source="mastif")->mastif.sp
+
+rbind(gbif.sp,mastif.sp) |> 
+  ggplot(aes(color=source))+
+  geom_pointrange(aes(y=var,x=opt,xmin=low,xmax=high),position=position_dodge(width = 0.5))+
+  scale_color_manual(values=c("darkgrey","darkred"))+
+  theme_classic()+
+  theme(strip.text = element_blank(),
+        axis.line.y = element_blank(),
+        axis.ticks.y = element_blank(),
+        axis.title = element_blank(),
+        legend.position = "left")+
+  labs(color="")+
+  facet_wrap(var~species,ncol=2,scales="free")->p
+```
 
 ## Map of NFI plots
 
@@ -226,6 +264,44 @@ fecundity.fit.1|>
         axis.text = element_blank(),
         legend.position = "bottom")+
   ggtitle("10 % of NFI plots")
+```
+
+
+```{r}
+fecundity.fit.1|> 
+  filter(dh>=(-2000)) |> 
+  filter(species%in%c("abiesAlba","pinusContorta")) |> 
+  dplyr::select(species,plot,lat,lon,fecGmMu) |> 
+  filter(fecGmMu<18000) |> 
+  unique() -> fec_plot 
+fec_plot |> 
+  group_by(species) |> 
+  summarise(min.lon=min(lon),
+            max.lon=max(lon),
+            min.lat=min(lat),
+            max.lat=max(lat)) -> sp.rang
+
+fecundity.fit.1|> 
+  filter(dh>=(-2000)) |> 
+  filter(species%in%c("abiesAlba")) |> 
+  dplyr::select(species,plot,lat,lon,fecGmMu) |> 
+  filter(fecGmMu<18000) |> 
+  unique() |> 
+  ggplot() +
+  geom_sf(data=worldmap,fill=NA) +
+  geom_point(aes(x=lon,y=lat,color=fecGmMu),size=1.5)+
+  xlim(-5,25) +
+  ylim(38,53)+
+  # xlim(-135,-50) +
+  # ylim(36,73)+
+  theme_minimal()+
+  theme(axis.title = element_blank(),
+        axis.text = element_blank(),
+        legend.position = "bottom")+
+  scale_color_continuous(type="viridis",trans="log",breaks=c(50,500,5000))+
+  labs(color="Fecundity (g)")->p
+
+rm(fec_plot)
 ```
 
 ### Color by abundance and biogeography 
@@ -2038,12 +2114,15 @@ plt<-fitspecies |>
                                margin.temp=="cold"~"Cold")) |> 
   group_by(zone,species,margin.temp) |> 
   summarise(med.ISP=weighted.quantile(fit,w=1/(quant95-quant05), prob=0.5)[[1]],
+            q05=weighted.quantile(fit,w=1/(quant95-quant05), prob=0.05)[[1]],
+            q95=weighted.quantile(fit,w=1/(quant95-quant05), prob=0.95)[[1]],
             mean.ISP=mean(fit),
             med.dh=median(dh),
             med.mat=median(mat)) |>
   ungroup() |> 
   ggplot()+
   geom_point(aes(med.mat,med.ISP,color=zone))+
+  geom_linerange(aes(x=med.mat,ymin=q05,ymax=q95))+
   geom_line(data = model_data,
             aes(mat.pred,pred.isp,color=zone),
             linewidth=1) +
@@ -2259,10 +2338,18 @@ nfi.tot|>
   ungroup() |> 
   group_by(zone,corzone,corzone.select,select.sp,species) |> 
   summarise(cordhmat=cor(mat,dh,use="complete"))  |>
+  group_by(zone) |> 
+  mutate(corzonesp=mean(cordhmat,na.rm=TRUE)) |> 
+  ungroup() |> 
+  group_by(zone,select.sp) |> 
+  mutate(corzone.select.sp=mean(cordhmat,na.rm=TRUE)) |> 
+  ungroup() |> 
   ggplot(aes(cordhmat,fill=select.sp))+
   geom_histogram()+
-  geom_vline(aes(xintercept=corzone))+
-  geom_vline(aes(xintercept=corzone.select,color=select.sp))+
+  geom_vline(aes(xintercept=corzone), linewidth=1)+
+  # geom_vline(aes(xintercept=corzone.select,color=select.sp))+
+  geom_vline(aes(xintercept = corzonesp),color="darkgrey", linewidth=1)+
+  geom_vline(aes(xintercept = corzone.select.sp,color=select.sp))+
   facet_wrap(~zone)
 
 
@@ -2355,7 +2442,7 @@ fitbiomecontinuous |>
                          biome==5~"Temperate coniferous",
                          biome==6~"Boreal",
                          biome==8~"Temperate Grasslands",
-                         biome==12~"Mediteranean",
+                         biome==12~"Mediterranean",
                          biome==13~"Desert")) |> 
   filter(margin.temp=="hot") |>
   filter(margin.deficit%in%c("Arid","Humid")) |> 
@@ -2387,13 +2474,60 @@ fitbiomecontinuous |>
 b
 cowplot::plot_grid(a,b,rel_heights = c(6,6),nrow = 2)->p
 p
-ggsave( p,
-        filename = "fig3.pdf",
-        dpi = 600,
-        width = 19.5,
-        height=15,
-        units = "cm")
+# ggsave( p,
+#         filename = "fig3.pdf",
+#         dpi = 600,
+#         width = 19.5,
+#         height=15,
+#         units = "cm")
 
+```
+```{r}
+fitbiomecontinuous |> 
+  group_by(biome,species) |> 
+  mutate(margin.deficit=case_when(dh<weighted.quantile(dh,w=BA, prob=0.01)[[1]]~"humid",
+                              dh<weighted.quantile(dh,w=BA, prob=0.545)[[1]]&
+                                 dh>weighted.quantile(dh,w=BA, prob=0.495)[[1]]~"midhum",
+                               dh>weighted.quantile(dh,w=BA, prob=0.99)[[1]]~"arid")) |> 
+  filter(!is.na(margin.deficit)) |> 
+  ungroup() |>
+  mutate(biome=case_when(biome==4~"Temperate deciduous",
+                         biome==5~"Temperate coniferous",
+                         biome==6~"Boreal",
+                         biome==8~"Temperate Grasslands",
+                         biome==12~"Mediteranean",
+                         biome==13~"Desert")) |> 
+
+  group_by(biome,margin.deficit) |> 
+  summarise(mean=mean(fit),
+            q05=quantile(fit,probs=0.05),
+            q95=quantile(fit,probs = 0.95))
+
+
+fitbiomecontinuous |> 
+  group_by(biome) |> 
+  mutate(margin.deficit=case_when(dh<weighted.quantile(dh,w=BA, prob=0.005)[[1]]~"Humid",
+                              dh<weighted.quantile(dh,w=BA, prob=0.525)[[1]]&
+                                 dh>weighted.quantile(dh,w=BA, prob=0.475)[[1]]~"Median",
+                               dh>weighted.quantile(dh,w=BA, prob=0.995)[[1]]~"Arid")) |> 
+  ungroup() |> 
+  # mutate(margin.temp=factor(margin.temp,levels=c("cold","midtemp","hot")),
+  #        margin.deficit=factor(margin.deficit,levels=c("Humid","Median","Arid")),
+  #        biome=case_when(biome==4~"Temperate deciduous",
+  #                        biome==5~"Temperate coniferous",
+  #                        biome==6~"Boreal",
+  #                        biome==8~"Temperate Grasslands",
+  #                        biome==12~"Mediterranean",
+  #                        biome==13~"Desert")) |> 
+  filter(margin.temp=="hot") |>
+  filter(margin.deficit%in%c("Arid","Humid")) |> 
+  left_join(batot) |> 
+  group_by(biome,species,margin.deficit) |>
+  mutate(med.ba=median(log(ba_tot))) |> ungroup() |> 
+  group_by(species) |> 
+  mutate(logba=ba_tot/mean(ba_tot))->t.test
+t.test(t.test[t.test$biome==6&t.test$margin.deficit=="Arid","ba_tot"],
+       t.test[t.test$biome==6&t.test$margin.deficit=="Humid","ba_tot"])
 ```
 
 
