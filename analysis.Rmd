@@ -14,7 +14,23 @@ lapply(c("stringr","tidyr","dplyr","tibble", # data analysis
          "rworldmap" # geographic data #terre, sf
          ),require,character.only=TRUE)
 theme_set(theme_minimal()) # ggplot theme
+common_theme <- theme(
+  # legend.position = "none",
+  strip.background = element_rect(fill = "white",
+                                        colour = "gray12"),
+  panel.background = element_rect(fill = "white",
+                                  colour = "gray12",
+                                  size = 0.5, linetype = "solid"),
+  plot.title = element_text(size = 12),
+  axis.title = element_text(size = 10),
+  axis.text = element_text(size = 10),
+  strip.text = element_text(size =10),
+  plot.margin = unit(c(0, 0.2, 0, 0.2), "cm")  # Example margin; adjust as needed
+)
+```
 
+
+```{r data, include=FALSE}
 
 # load necessary data #
 
@@ -58,37 +74,11 @@ tar_load(fecundity.eu_clim,store="target_nfi")
 tar_load(fecundity.am_clim,store="target_nfi")
 
 worldmap <- sf::st_as_sf(getMap(resolution = "high"))
-```
 
-# Associate species to biomes
-```{r}
-fec_tot=rbind(fecundity.eu_clim |> mutate(block="europe"),
-                fecundity.am_clim|> mutate(block="america")) |>
-  left_join(phylo.select) |> 
-  dplyr::select(plot,lon,lat,species,BA,fecGmMu,fecGmSd,sgdd,wai,pet,map,mat,block,zone) |> 
-  filter(BA!=0) |> #rm absences
-  mutate(dh=12*pet-map)
-ecoregions=sf::read_sf(dsn="data/WWF/official", #read ecoregions
-                   layer="wwf_terr_ecos") |>
-  select(BIOME,ECO_NAME,geometry) |> 
-  filter(!BIOME%in%c(98,99))
-sf::sf_use_s2(FALSE)
-points=sf::st_as_sf(fec_tot[,c("lon","lat")],coords=c("lon","lat"),crs=sf::st_crs(ecoregions))
-points_biome=sf::st_join(points,ecoregions) 
-
-cbind(fec_tot,
-      biome=points_biome$BIOME) |> 
-  group_by(species) |> mutate(n_sp=n()) |> 
-  group_by(n_sp,species,biome) |>
-  summarise(n=n()/n_sp) |> unique() |> ungroup() |> 
-  group_by(species) |> 
-  arrange(desc(n), .by_group = TRUE) %>%
-  slice_head(n = 2) |> 
-  filter(n>0.1) |> 
-  ungroup() |> 
-  select(species,biome,n) |> 
-  mutate(biome=case_when(biome==13 ~ 12,
-                         TRUE ~ biome))->sp_biome
+# model output
+tar_load(fitbiomecontinuous,store="target_fit")
+tar_load(fitcontinentdiscrete,store="target_fit")
+tar_load(fitspecies,store="target_fit")
 ```
 
 # Introduction 
@@ -97,14 +87,14 @@ cbind(fec_tot,
 ```{r}
 p<-rbind(readRDS("target_data/objects/mastif.am")$df.tree,
       readRDS("target_data/objects/mastif.eu")$df.tree) |> 
-  filter(species %in% c(sp.select.am,sp.select.eu)) |> 
+  filter(species %in% c(sp.select.am,sp.select.eu)) |>
   select(species,lon,lat) |> 
   distinct() |> 
   ggplot() +
   geom_sf(data=worldmap,fill=NA) +
   geom_jitter(aes(x=lon,y=lat,color=species),size=1.3,alpha=0.5)+
   theme_minimal()+
-  xlim(-135,24) + 
+  xlim(-135,35) + 
   ylim(27,73)+
   theme(axis.title = element_blank(),
         axis.text = element_blank(),
@@ -185,6 +175,7 @@ p
 #         height=9,
 #         units = "cm")
 ```
+
 ```{r}
 sp.fig=c("abiesAlba","pinusSylvestr")
 species_selection$df.gbif |> 
@@ -300,7 +291,7 @@ fecundity.fit.1|>
         legend.position = "bottom")+
   scale_color_continuous(type="viridis",trans="log",breaks=c(50,500,5000))+
   labs(color="Fecundity (g)")->p
-
+p
 rm(fec_plot)
 ```
 
@@ -2087,8 +2078,9 @@ model_data <- fitspecies |>
   }) %>%
   # filter(term == "med.mat") %>%
   group_by(zone,margin.temp) |> 
-  mutate(significant = sum(p.value < 0.05)) |> 
-  filter(significant>=1) |> 
+  mutate(significant = (p.value < 0.1) & term =="med.mat" ) |> 
+  group_by(zone,margin.temp) |> 
+  filter(sum(significant)>=1) |> 
   dplyr::select(term,estimate,zone,margin.temp,max.mat,min.mat)
 model_data=model_data |> 
   pivot_wider(names_from = term,
@@ -2119,30 +2111,30 @@ plt<-fitspecies |>
             mean.ISP=mean(fit),
             med.dh=median(dh),
             med.mat=median(mat)) |>
+  mutate(signif=!(q05<0&q95>0)) |> 
   ungroup() |> 
   ggplot()+
-  geom_point(aes(med.mat,med.ISP,color=zone))+
-  geom_linerange(aes(x=med.mat,ymin=q05,ymax=q95))+
+  geom_point(aes(med.mat,med.ISP,color=zone,shape=signif))+
+  geom_linerange(aes(x=med.mat,ymin=q05,ymax=q95,color=zone))+
   geom_line(data = model_data,
             aes(mat.pred,pred.isp,color=zone),
             linewidth=1) +
-  geom_hline(yintercept = 0,color="gray12")+
-  geom_vline(xintercept = 0,color="gray12")+
-  # xlim(c(-3000,1500))+
-  ylim(c(-3,3))+ # points out of range
-  theme(legend.position = "none",
-        axis.text.y = element_text(colour = "white"),
-        title = element_text(size =12),
-        strip.text = element_text(size =10),
-        axis.title =  element_text(size=10),
-        axis.text =  element_text(size=10),
-        legend.text = element_text(size=10))+
+  geom_hline(yintercept = 0,color="gray32")+
+  geom_vline(xintercept = 0,color="gray32")+
+  common_theme+
+  theme(legend.position = "none")+
   scale_color_manual(values=c("firebrick1","slateblue","firebrick4"))+
-  labs(title="Species ",
-       y="",
+  scale_shape_manual(values=c(1,19))+
+  scale_y_continuous(breaks = c(-4,-0.5,0.5,4))+
+  labs(title="B. Species ",
+       y="Log ratio of fecundity  \nrelative to the mean",
        x="Mean annual temperature")+
-  facet_wrap(~margin.temp,nrow = 2)
+  facet_wrap(~margin.temp,ncol = 2)
+plt
+```
 
+
+```{r}
 bowp<-fitcontinentdiscrete |>
   filter(margin.temp%in%c("hot","cold")) |>
   mutate(margin.temp=case_when(margin.temp=="hot"~"Hot",
@@ -2150,28 +2142,30 @@ bowp<-fitcontinentdiscrete |>
   ggplot(aes(1,posterior,color=zone))+
   geom_boxplot(outlier.colour = NA)+
   scale_color_manual(values=c("firebrick4","firebrick1","slateblue"))+
-  theme(legend.position = "left",
-        axis.text.x = element_text(colour = "white"),
-        title = element_text(size =12),
-        strip.text = element_text(size =10),
-        axis.title =  element_text(size=10),
-        axis.text =  element_text(size=10),
-        legend.text = element_text(size=10))+
-  ylim(c(-3,3))+
-  geom_hline(yintercept = 0,color="gray12",type="dashed")+
+  # theme_gray()+
+  common_theme+
+  theme(axis.text.x=element_blank(),
+        legend.position = c(0.65,0.4),
+        legend.background = element_rect(fill = "white",
+                                         size = 0.5),
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor.x = element_blank())+
+  # ylim(c(-3,3))+
+  geom_hline(yintercept = 0,color="gray32",type="dashed")+
   labs(x="",
-       y="Log ratio of fecundity relative to the mean",
-       title="Continent")+
-  facet_wrap(~margin.temp,nrow=2)
-cowplot::plot_grid(bowp,plt,rel_widths = c(1,2))  -> p
-
+       y="Log ratio of fecundity \nrelative to the mean",
+       title="A. Continent")+
+  facet_wrap(~margin.temp,ncol=2)
+bowp
+cowplot::plot_grid(bowp,plt,nrow=2,rel_heights = c(2,1.2))  -> p
 p
-ggsave( p,
-        filename = "fig1.pdf",
-        dpi = 600,
-        width = 19.5,
-        height=15,
-        units = "cm")
+
+# ggsave( p,
+#         filename = "fig1.1.png",
+#         dpi = 600,
+#         width = 12,
+#         height=15,
+#         units = "cm")
 
 
 ```
@@ -2283,7 +2277,6 @@ tar_load(sp.select.am,store="target_nfi")
 
 load(paste0("data/europe/BA.rdata"))
 as.data.frame(BA)|> 
-    rownames_to_column(var="plot") |> 
     # dplyr::select(plot,matches(sp.select)) |> 
     pivot_longer(cols=-plot,
                  names_to = "species",
@@ -2377,7 +2370,57 @@ nfi.tot |>
 
 ```
 
-## fig3
+## fig 3
+
+```{r}
+fitbiomecontinuous |> 
+  mutate(margin.temp=ifelse(margin.temp=="hot","Hot",
+                            ifelse(margin.temp=="cold","Cold","midtemp")),
+         margin.temp=factor(margin.temp,levels=c("Cold","midtemp","Hot")),
+         biome=case_when(biome==4~"Temperate deciduous",
+                         biome==5~"Temperate coniferous",
+                         biome==6~"Boreal",
+                         biome==8~"Temperate Grasslands",
+                         biome==12~"Mediteranean",
+                         biome==13~"Desert")) |> 
+  filter(margin.temp!="midtemp") |>
+  group_by(biome) |> 
+  mutate(n_sp=n_distinct(species)) |> ungroup() |> 
+  mutate(biome=paste0(biome,"\n(n = ",n_sp,")")) |> 
+  # select(biome,fit,margin.temp) |> unique() |> 
+  ggplot(aes(biome,fit,fill=biome))+
+  geom_boxplot(outlier.colour = NA,
+               linewidth=0.1)+
+  facet_wrap(~margin.temp)+
+  common_theme+
+  theme(axis.text.x = element_blank())+
+  geom_hline(yintercept = 0,color="grey32")+
+  ylim(c(-3,2))+
+  # scale_fill_manual(values=c("steelblue1","bisque2","firebrick1"))+
+  scale_fill_manual(values=c("turquoise3","tomato2","seagreen4","springgreen2"))+
+  # facet_wrap(~biome, nrow = 4)+
+  # theme(legend.position="left",
+  #       strip.text = element_text(size=12),
+  #       axis.title =  element_text(size=10),
+  #       axis.text =  element_text(size=10),
+  #       legend.text = element_text(size=10)
+  #       )+
+  # # theme_bw()+
+  labs(#fill="",
+       fill="Biome \n(species number)",
+       x="",
+       y="Log ratio of fecundity \n relative to the species mean")-> a
+
+# ggsave( a,
+#         filename = "fig2.pdf",
+#         dpi = 600,
+#         width = 12,
+#         height=7,
+#         units = "cm")
+```
+
+
+## fig4
 
 ```{r}
 fitbiomecontinuous |> 
@@ -2411,8 +2454,8 @@ fitbiomecontinuous |>
   geom_hline(yintercept = 0,color="grey")+
   scale_fill_manual(values=c("steelblue1","bisque2","firebrick1"))+
   # scale_color_manual(values=c("steelblue1","bisque2","firebrick1"))+
-  facet_wrap(~biome, ncol = 4)+
-  theme(legend.position="top",
+  facet_wrap(~biome, nrow = 4)+
+  theme(legend.position="left",
         strip.text = element_text(size=12),
         axis.title =  element_text(size=10),
         axis.text =  element_text(size=10),
@@ -2423,6 +2466,7 @@ fitbiomecontinuous |>
        color="",
        x="",
        y="Log ratio of fecundity \n relative to the species mean")->a
+
 
 
 fecundity.fit.1 |> 
@@ -2460,9 +2504,9 @@ fitbiomecontinuous |>
               color="black",
               textsize = 4)+
   scale_fill_manual(values=c("steelblue1","firebrick1"))+
-  facet_wrap(~biome,ncol=4)+
+  facet_wrap(~biome,nrow=4)+
   theme(legend.position = "none",
-        strip.text = element_blank(),
+        strip.text = element_text(colour = "white"),
         axis.text =  element_text(size=10),
         axis.title =  element_text(size=10))+
   scale_y_log10()+
@@ -2472,7 +2516,7 @@ fitbiomecontinuous |>
 
 
 b
-cowplot::plot_grid(a,b,rel_heights = c(6,6),nrow = 2)->p
+cowplot::plot_grid(a,b,rel_widths = c(6,2),ncol = 2)->p
 p
 # ggsave( p,
 #         filename = "fig3.pdf",
@@ -2530,4 +2574,151 @@ t.test(t.test[t.test$biome==6&t.test$margin.deficit=="Arid","ba_tot"],
        t.test[t.test$biome==6&t.test$margin.deficit=="Humid","ba_tot"])
 ```
 
+```{r}
+fitbiomecontinuous |> 
+  mutate(margin.temp=factor(margin.temp,levels=c("cold","midtemp","hot")),
+         biome=case_when(biome==4~"Temperate deciduous",
+                         biome==5~"Temperate coniferous",
+                         biome==6~"Boreal",
+                         biome==8~"Temperate Grasslands",
+                         biome==12~"Mediterranean",
+                         biome==13~"Desert")) |> 
+  filter(margin.temp=="hot") |>
+  left_join(batot) |> 
+  filter(ba_tot<200) |> 
+  group_by(biome,margin.temp) |> 
+  mutate(margin.compet=case_when(ba_tot<quantile(ba_tot,probs=0.05)[[1]]~"Low",
+                              ba_tot<quantile(ba_tot,probs=0.525)[[1]]&
+                                 ba_tot>quantile(ba_tot, probs=0.475)[[1]]~"mid",
+                               ba_tot>quantile(ba_tot, probs=0.95)[[1]]~"High"),
+         margin.compet=factor(margin.compet,levels=c("Low","mid","High"))) |> 
+  filter(margin.compet%in%c("Low","High")) |> 
+  select(margin.compet,biome,fit) |> unique() |> 
+  ggplot(aes(margin.compet,fit,fill=margin.compet))+
+  geom_boxplot(outlier.colour = NA,
+               linewidth=0.1)+
+  ggpubr::geom_signif(comparisons = list(c("Low","High")),
+                      map_signif_level = TRUE,
+                      color="black",
+                      test="t.test",
+                      y_position=1.5)+
+  scale_fill_manual(values=c("steelblue1","firebrick1"))+
+  facet_wrap(~biome,ncol=4)+
+  common_theme+
+  theme(axis.text.x = element_blank(),
+        legend.position="bottom")+#c(0.8,0.2))+
+  geom_hline(yintercept = 0,color="grey32")+
+  labs(x="",
+       y="Log ratio of fecundity \n relative to the species mean",
+       fill="Stress level",
+       title="B. Level of competition")->a
+
+fitbiomecontinuous |> 
+  mutate(margin.temp=factor(margin.temp,levels=c("cold","midtemp","hot")),
+         biome=case_when(biome==4~"Temperate deciduous",
+                         biome==5~"Temperate coniferous",
+                         biome==6~"Boreal",
+                         biome==8~"Temperate Grasslands",
+                         biome==12~"Mediterranean",
+                         biome==13~"Desert"),
+         margin.deficit=ifelse(margin.deficit=="arid","High",
+                            ifelse(margin.deficit=="humid","Low","midtemp")),
+         margin.deficit=factor(margin.deficit,levels=c("Low","midtemp","High"))) |> 
+  filter(margin.temp=="hot") |>
+  filter(margin.deficit%in%c("High","Low")) |> 
+  ggplot(aes(margin.deficit,fit,fill=margin.deficit))+
+  geom_boxplot(outlier.colour = NA,
+               linewidth=0.1)+
+  ggpubr::geom_signif(comparisons = list(c("High","Low")),
+                      test="t.test",
+                      map_signif_level = TRUE,
+                      color="black",
+                      y_position=2)+
+  ylim(c(-1.5,3))+
+  scale_fill_manual(values=c("steelblue1","firebrick1"))+
+  facet_wrap(~biome,ncol=4)+
+  common_theme+
+  theme(axis.text.x = element_blank(),
+        legend.position="none")+#c(0.8,0.2))+
+  geom_hline(yintercept = 0,color="grey32")+
+  labs(x="",
+       y="Log ratio of fecundity \n relative to the species mean",
+       fill="Stress level",
+       title="A. Level of moisture deficit")->b
+
+cowplot::plot_grid(b,a,rel_heights=c(1,1.3),nrow=2)->p
+p
+# ggsave( p,
+#         filename = "fig4.png",
+#         dpi = 600,
+#         width = 18,
+#         height=12,
+#         units = "cm")
+
+
+fecundity.fit.1 |> 
+  left_join(batot) |> 
+  select(-biome) |>
+  left_join(fitbiomecontinuous |> 
+              select(species,biome) |> 
+              unique()) |> 
+  filter(ba_tot<200) |> 
+  group_by(species) |> 
+  mutate(dh=scale(dh),
+         ba_tot=scale(ba_tot)) |> 
+  filter(margin.temp%in%c("cold","hot") )|>
+  filter(biome%in%c(4,5,6,12)) |> 
+  mutate(biome=case_when(biome==4~"Temperate deciduous",
+                         biome==5~"Temperate coniferous",
+                         biome==6~"Boreal",
+                         biome==8~"Temperate Grasslands",
+                         biome==12~"Mediterranean",
+                         biome==13~"Desert"),
+         deficit.lev=cut(dh,breaks=100,labels=1:100),
+         compet.lev=cut(ba_tot,breaks=100,labels=1:100)) |> 
+  group_by(biome) |> mutate(n_biome=n()) |> ungroup() |> 
+  group_by(biome,margin.temp,compet.lev,deficit.lev) |> 
+  summarise(n=log(n()/n_biome)) |> 
+  ggplot(aes(deficit.lev,compet.lev,fill=n))+
+  geom_tile()+
+  facet_grid(margin.temp~biome)+
+  scale_fill_gradientn(colours=viridis(15))
+  
+```
+
+
+
+```{r eval=FALSE, include=FALSE}
+load("data/mastif_plots/fittedFecundityMastifNorthAmerica.rdata")
+tree_am=fecundityPred
+load("data/mastif_plots/fittedFecundityMastifEurope.rdata")
+tree_eu=fecundityPred
+
+
+plot_fitted=fitbiomecontinuous |> 
+  group_by(biome) |> 
+  mutate(margin.deficit=case_when(dh<weighted.quantile(dh,w=BA, prob=0.005)[[1]]~"Humid",
+                              dh<weighted.quantile(dh,w=BA, prob=0.525)[[1]]&
+                                 dh>weighted.quantile(dh,w=BA, prob=0.475)[[1]]~"Median",
+                               dh>weighted.quantile(dh,w=BA, prob=0.995)[[1]]~"Arid")) |> 
+  ungroup() |> 
+  mutate(margin.temp=factor(margin.temp,levels=c("cold","midtemp","hot")),
+         margin.deficit=factor(margin.deficit,levels=c("Humid","Median","Arid")),
+         biome=case_when(biome==4~"Temperate deciduous",
+                         biome==5~"Temperate coniferous",
+                         biome==6~"Boreal",
+                         biome==8~"Temperate Grasslands",
+                         biome==12~"Mediterranean",
+                         biome==13~"Desert")) |> 
+  filter(margin.temp=="hot") |>
+  filter(margin.deficit%in%c("Arid","Humid")) |> 
+  select(plot,species,biome,margin.temp,margin.deficit) 
+
+plot_fitted
+
+rbind(tree_am,tree_eu) |> 
+  rownames_to_column( var = "plot") |> 
+  # separate(plot,into=c("plot","year"),sep="_") |> 
+  filter(grepl("SK",plot))
+```
 
