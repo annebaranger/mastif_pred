@@ -2573,6 +2573,8 @@ fitbiomecontinuous |>
 t.test(t.test[t.test$biome==6&t.test$margin.deficit=="Arid","ba_tot"],
        t.test[t.test$biome==6&t.test$margin.deficit=="Humid","ba_tot"])
 ```
+ 
+### constraint effect on fecundity
 
 ```{r}
 fitbiomecontinuous |> 
@@ -2685,7 +2687,93 @@ fecundity.fit.1 |>
   scale_fill_gradientn(colours=viridis(15))
   
 ```
+### constraint difference in the margin
 
+```{r}
+fecundity.fit.1 |> 
+  left_join(batot) |> 
+  select(-biome) |>
+  left_join(fitbiomecontinuous |> 
+              select(species,biome) |> 
+              unique()) |> 
+  mutate(margin.temp=factor(margin.temp,levels=c("cold","midtemp","hot")),
+         biome=case_when(biome==4~"Temperate deciduous",
+                         biome==5~"Temperate coniferous",
+                         biome==6~"Boreal",
+                         biome==8~"Temperate Grasslands",
+                         biome==12~"Mediterranean",
+                         biome==13~"Desert")) |> 
+  filter(margin.temp%in%c("cold","hot")) |>
+  filter(ba_tot<200,ba_tot>5) |>
+  # group_by(biome,margin.temp) |> 
+  # mutate(margin.compet=case_when(ba_tot<quantile(ba_tot,probs=0.05)[[1]]~"Low",
+  #                             ba_tot<quantile(ba_tot,probs=0.525)[[1]]&
+  #                                ba_tot>quantile(ba_tot, probs=0.475)[[1]]~"mid",
+  #                              ba_tot>quantile(ba_tot, probs=0.95)[[1]]~"High"),
+  #        margin.compet=factor(margin.compet,levels=c("Low","mid","High"))) |> 
+  # filter(margin.compet%in%c("Low","High")) |> 
+  # select(margin.compet,biome,fit) |> unique() |> 
+  ggplot(aes(margin.temp,ba_tot,fill=margin.temp))+
+  geom_boxplot(outlier.colour = NA,
+               linewidth=0.1)+
+  ggpubr::geom_signif(comparisons = list(c("cold","hot")),
+                      map_signif_level = TRUE,
+                      color="black",
+                      test="t.test",
+                      y_position=1.5)+
+  scale_fill_manual(values=c("steelblue1","firebrick1"))+
+  facet_wrap(~biome,ncol=4)+
+  common_theme+
+  theme(axis.text.x = element_blank(),
+        legend.position="bottom")+#c(0.8,0.2))+
+  geom_hline(yintercept = 0,color="grey32")+
+  scale_y_log10()+
+  labs(x="",
+       y="Total basal area on plot (m2/ha)",
+       fill="Margin",
+       title="B. Level of competition")->b
+
+fecundity.fit.1 |> 
+  left_join(batot) |> 
+  select(-biome) |>
+  left_join(fitbiomecontinuous |> 
+              select(species,biome) |> 
+              unique()) |> 
+  mutate(margin.temp=factor(margin.temp,levels=c("cold","midtemp","hot")),
+         biome=case_when(biome==4~"Temperate deciduous",
+                         biome==5~"Temperate coniferous",
+                         biome==6~"Boreal",
+                         biome==8~"Temperate Grasslands",
+                         biome==12~"Mediterranean",
+                         biome==13~"Desert")) |> 
+  filter(margin.temp%in%c("cold","hot")) |>
+  filter(dh>(-3000)) |> 
+  ggplot(aes(margin.temp,dh,fill=margin.temp))+
+  geom_boxplot(outlier.colour = NA,
+               linewidth=0.1)+
+  ggpubr::geom_signif(comparisons = list(c("cold","hot")),
+                      test="t.test",
+                      map_signif_level = TRUE,
+                      color="black",
+                      y_position=1000)+
+  scale_fill_manual(values=c("steelblue1","firebrick1"))+
+  facet_wrap(~biome,ncol=4)+
+  ylim(c(-2000,2000))+
+  common_theme+
+  theme(axis.text.x = element_blank(),
+        legend.position="none")+#c(0.8,0.2))+
+  geom_hline(yintercept = 0,color="grey32")+
+  labs(x="",
+       y="Moisture deficit (mm)",
+       fill="Stress level",
+       title="A. Level of moisture deficit")->a
+cowplot::plot_grid(a,b,rel_heights=c(1,1.3),nrow=2)->p
+p
+```
+
+
+
+### other
 
 
 ```{r eval=FALSE, include=FALSE}

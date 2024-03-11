@@ -13,14 +13,14 @@ tar_option_set(packages = c("stringr","ggplot2","tidyr","dplyr","terra","factoex
 
 fecundity.eu_clim=tar_read(fecundity.eu_clim,store="target_nfi")
 fecundity.am_clim=tar_read(fecundity.am_clim,store="target_nfi")
-species_class=tar_read(species_class,store="target_nfi")
 phylo.select=tar_read(phylo.select,store="target_nfi")
+species_selection=tar_read(species_selection,store="target_nfi")
 
 #Targets
 list(
   tar_target(
     phylo.zone,
-    phylo.select|> left_join(species_class) |> 
+    phylo.select|> 
       mutate(zone=case_when(species=="abiesCephalon"~"europe",
                             species=="acerCircinat"~"west",
                             species=="acerSpicatum"~"east",
@@ -36,12 +36,14 @@ list(
     raw_data(fecundity.eu_clim,
              fecundity.am_clim,
              phylo.zone,
+             species_selection$select.quant,
              thresh=0.1)
   ),
   tar_target(
     fecundity.fit.05,
     raw_data(fecundity.eu_clim,
              fecundity.am_clim,
+             species_selection$select.quant,
              phylo.zone,
              thresh=0.05)
   ),

@@ -28,13 +28,16 @@
 raw_data <- function(fecundity.eu_clim, 
                      fecundity.am_clim,
                      phylo.select,
+                     species_selection,
                      thresh=0.1){
   fec_tot=rbind(fecundity.eu_clim |> mutate(block="europe"),
                 fecundity.am_clim|> mutate(block="america")) |>
-    left_join(phylo.select) |> 
-    dplyr::select(plot,lon,lat,taxa,genus,species,BA,fecGmMu,fecGmSd,sgdd,wai,pet,map,mat,block,zone) |> 
+    left_join(phylo.select) |>
+    dplyr::select(plot,lon,lat,taxa,genus,species,BA,ISP,fecGmMu,fecGmSd,sgdd,wai,pet,map,mat,block,zone) |>
     filter(BA!=0) |> #rm absences
     mutate(dh=12*pet-map) |> 
+    filter(!is.na(ISP)) |> 
+    filter(species %in% species_selection) |> 
     group_by(species) |> 
     # compute weighted quantiles of sgdd and wai, and correlation between wai and sgdd
     mutate(margin.temp=case_when(mat<=weighted.quantile(mat,w=BA, prob=thresh)[[1]]~"cold",
@@ -47,9 +50,9 @@ raw_data <- function(fecundity.eu_clim,
                                       dh>weighted.quantile(dh,w=BA, prob=0.5-thresh/2)[[1]]~"midhum",
                                     dh>weighted.quantile(dh,w=BA, prob=1-thresh)[[1]]~"arid"),
            margin.deficit=factor(margin.deficit,levels=c("midhum","humid","arid"))) |> 
-    ungroup() |> 
-    mutate(ISP=fecGmMu/BA,
-           s_ISP=fecGmSd/(BA^2))
+    ungroup() #|> 
+    # mutate(ISP=fecGmMu/BA,
+    #        s_ISP=fecGmSd/(BA^2))
   ecoregions=sf::read_sf(dsn="data/WWF/official", #read ecoregions
                          layer="wwf_terr_ecos") |>
     select(BIOME,ECO_NAME,geometry) |> 

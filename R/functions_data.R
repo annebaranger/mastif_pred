@@ -315,7 +315,9 @@ select_species<-function(fecundity.eu_clim,
     mutate(dev=case_when(grepl("high",limit)~100*(value_mastif-value_nfi)/range.nfi,
                          grepl("low",limit)~100*(value_nfi-value_mastif)/range.nfi)) |> 
     filter(grepl("r",limit)) |> 
-    filter(dev>(-50)) |> 
+    group_by(species) |> 
+    mutate(ind_neg=sum(dev>(-50))) |> ungroup() |> 
+    filter(ind_neg==4) |> 
     select(species) |> unique() |> pull() -> select.rank
   mastif.species.niche |> 
     left_join(nfi.species.niche,by=c("species","clim","limit")) |> 
@@ -323,7 +325,9 @@ select_species<-function(fecundity.eu_clim,
     mutate(dev=case_when(grepl("high",limit)~100*(value_mastif-value_nfi)/range.nfi,
                          grepl("low",limit)~100*(value_nfi-value_mastif)/range.nfi)) |> 
     filter(grepl("q",limit)) |> 
-    filter(dev>(-50)) |> 
+    group_by(species) |> 
+    mutate(ind_neg=sum(dev>(-50))) |> ungroup() |> 
+    filter(ind_neg==4) |> 
     select(species) |> unique() |> pull() -> select.quant
   
   return(list(select.rank=select.rank,
