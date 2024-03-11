@@ -122,127 +122,213 @@ get_specieslist <- function(species.list,block){
 #' @authors Anne Baranger (INRAE - LESSEM)
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-select_species <- function(mastif.am,
-                           mastif.eu,
-                           meanClimate_species){
-  df.tree=rbind(mastif.am$df.tree,mastif.eu$df.tree) 
-  df.species=rbind(mastif.am$df.species.select |> mutate(block="america"),
-                   mastif.eu$df.species.select|> mutate(block="europe"))
+# select_species <- function(mastif.am,
+#                            mastif.eu,
+#                            meanClimate_species){
+#   df.tree=rbind(mastif.am$df.tree,mastif.eu$df.tree) 
+#   df.species=rbind(mastif.am$df.species.select |> mutate(block="america"),
+#                    mastif.eu$df.species.select|> mutate(block="europe"))
+#   
+#   # format gbif output
+#   df.niche= meanClimate_species |> 
+#     separate(species,into=c("genus","sp"),remove=FALSE) |> 
+#     mutate(species_l=species,
+#            species=paste0(substr(tolower(genus),1,8),substr(str_to_title(sp),1,8))) |> 
+#     rename_with(.cols=c("mat","map","tmin"),
+#                 ~paste0(.x,".opt")) |> 
+#     dplyr::select(-genus,-sp) |> 
+#     mutate(mat.range=mat.high-mat.low,
+#            map.range=map.high-map.low,
+#            tmin.range=tmin.high-tmin.low) |> 
+#     pivot_longer(cols=-c("species","species_l"),
+#                  names_to = "clim",
+#                  values_to = "clim_niche")
+#   
+#   df.range<-df.niche |> 
+#     dplyr::select(species,clim,clim_niche) |> 
+#     filter(grepl("range",clim)) |> 
+#     separate(clim,into=c("var","drop")) |> 
+#     dplyr::select(-drop) |> 
+#     rename(range="clim_niche")
+#   
+#   # compute weight for trees
+#   df.tree.weight=df.tree |>
+#     # replace 0 estimations by NA and compute, rescale mat and tmin
+#     mutate(fecEstSe=na_if(fecEstSe,0),
+#            fecEstMu=na_if(fecEstMu,0),
+#            across(c("mat","tmin"),
+#                   ~.x/10)
+#     ) |> 
+#     filter(!is.na(fecEstMu)) |> filter(!is.na(fecEstSe)) |> 
+#     # compute numbers of observations per plot
+#     group_by(plotID,species,mat,map,tmin) |> 
+#     summarise(n_plot=n(),
+#               fecEstMu_plot=mean(fecEstMu,na.rm=TRUE),
+#               se_plot=sqrt(sum(fecEstSe^2)/n_plot),
+#               cv_plot=se_plot/fecEstMu_plot) |> 
+#     # Compute mean of se per plot
+#     ungroup() |> 
+#     pivot_longer(cols=c("mat","tmin","map"),
+#                  names_to = "clim",
+#                  values_to = "clim_val")  |> 
+#     filter(!is.na(clim_val)) |> 
+#     group_by(species,clim) |>
+#     mutate(opt=weighted.quantile(clim_val,1/cv_plot,prob=0.5)[1],
+#            low=weighted.quantile(clim_val,1/cv_plot,prob=0.025)[1],#,probs=0.1)[1],
+#            high=weighted.quantile(clim_val,1/cv_plot,prob=0.975)[1],
+#            rhigh=weighted.quantile(clim_val,1/cv_plot, prob = 1- min(5, n())/n())[1],
+#            rlow=weighted.quantile(clim_val,1/cv_plot, prob = min(5, n())/n())[1]) |> 
+#     ungroup()
+#   
+#   df.tree.weight |>
+#     # format to match df.niche 
+#     dplyr::select(species,clim,low,high) |> unique() |> 
+#     pivot_wider(names_from = "clim",
+#                 values_from = c("high","low"), #"opt",
+#                 names_sep = ".") |> 
+#     pivot_longer(cols=-species,
+#                  names_to = "clim",
+#                  values_to = "clim_obs") |> 
+#     mutate(clim=paste0(str_split_i(clim,"\\.",2),".",str_split_i(clim,"\\.",1))) -> mastif.range.quant
+#   
+#   df.tree.weight |>
+#     # format to match df.niche 
+#     dplyr::select(species,clim,rlow,rhigh) |> unique() |> 
+#     pivot_wider(names_from = "clim",
+#                 values_from = c("rhigh","rlow"), #"opt",
+#                 names_sep = ".") |> 
+#     pivot_longer(cols=-species,
+#                  names_to = "clim",
+#                  values_to = "clim_obs") |> 
+#     mutate(clim=paste0(str_split_i(clim,"\\.",2),".",str_split_i(clim,"\\.",1))) -> mastif.range.rank
+#     #merge with gbif climate
+#   (mastif.range.quant |> 
+#     left_join(df.niche,by=c("species","clim")) |> 
+#     relocate(species_l,.after=species)|> 
+#     separate(clim,into=c("var","quant"),remove=FALSE) |> 
+#     relocate(var,.after=species_l) |> 
+#   # merge climate range
+#     left_join(df.range,by=c("species","var")) |> 
+#     # filter(!is.na(species_l)) |> 
+#     mutate(dif=case_when(grepl("high",clim)~100*(clim_obs-clim_niche)/range,
+#                          grepl("low",clim)~100*(clim_niche-clim_obs)/range)) |> 
+#     filter(dif<(-50)|is.na(dif)) |> # filter out large difference and also
+#       # species for which there is no data in GBIF
+#     dplyr::select(species) |> unique())$species->sp.deleted.quant
+#   (mastif.range.rank |> 
+#       left_join(df.niche,by=c("species","clim")) |> 
+#       relocate(species_l,.after=species)|> 
+#       separate(clim,into=c("var","quant"),remove=FALSE) |> 
+#       relocate(var,.after=species_l) |> 
+#       # merge climate range
+#       left_join(df.range,by=c("species","var")) |> 
+#       # filter(!is.na(species_l)) |> 
+#       mutate(dif=case_when(grepl("high",clim)~100*(clim_obs-clim_niche)/range,
+#                            grepl("low",clim)~100*(clim_niche-clim_obs)/range)) |> 
+#       filter(dif<(-50)|is.na(dif)) |> # filter out large difference and also
+#       # species for which there is no data in GBIF
+#       dplyr::select(species) |> unique())$species->sp.deleted.rank
+#   
+#   
+#   df.species.select=rbind(mastif.range.quant,
+#                           mastif.range.rank) |> 
+#     left_join(df.species) |> 
+#     pivot_wider(names_from = "clim",
+#                 values_from = "clim_obs") |> 
+#     mutate(select.quant=(!species %in% sp.deleted.quant),
+#            select.rank=(!species %in% sp.deleted.rank))
+#   
+#   return(list(df.gbif=df.niche,
+#               df.tree_w=df.tree.weight,
+#               df.select=df.species.select))
+# }
+
+
+select_species<-function(fecundity.eu_clim,
+                         fecundity.am_clim,
+                         mastif.am,
+                         mastif.eu){
   
-  # format gbif output
-  df.niche= meanClimate_species |> 
-    separate(species,into=c("genus","sp"),remove=FALSE) |> 
-    mutate(species_l=species,
-           species=paste0(substr(tolower(genus),1,8),substr(str_to_title(sp),1,8))) |> 
-    rename_with(.cols=c("mat","map","tmin"),
-                ~paste0(.x,".opt")) |> 
-    dplyr::select(-genus,-sp) |> 
-    mutate(mat.range=mat.high-mat.low,
-           map.range=map.high-map.low,
-           tmin.range=tmin.high-tmin.low) |> 
-    pivot_longer(cols=-c("species","species_l"),
-                 names_to = "clim",
-                 values_to = "clim_niche")
-  
-  df.range<-df.niche |> 
-    dplyr::select(species,clim,clim_niche) |> 
-    filter(grepl("range",clim)) |> 
-    separate(clim,into=c("var","drop")) |> 
-    dplyr::select(-drop) |> 
-    rename(range="clim_niche")
-  
-  # compute weight for trees
-  df.tree.weight=df.tree |>
-    # replace 0 estimations by NA and compute, rescale mat and tmin
+  mastif.species.niche<-rbind(mastif.am$df.tree, 
+                              mastif.eu$df.tree) |> 
+    mutate(dh=12*pet-map) |> 
     mutate(fecEstSe=na_if(fecEstSe,0),
-           fecEstMu=na_if(fecEstMu,0),
-           across(c("mat","tmin"),
-                  ~.x/10)
-    ) |> 
+           fecEstMu=na_if(fecEstMu,0)) |> 
     filter(!is.na(fecEstMu)) |> filter(!is.na(fecEstSe)) |> 
     # compute numbers of observations per plot
-    group_by(plotID,species,mat,map,tmin) |> 
+    group_by(plotID,species,mat,dh) |> 
     summarise(n_plot=n(),
               fecEstMu_plot=mean(fecEstMu,na.rm=TRUE),
               se_plot=sqrt(sum(fecEstSe^2)/n_plot),
               cv_plot=se_plot/fecEstMu_plot) |> 
     # Compute mean of se per plot
     ungroup() |> 
-    pivot_longer(cols=c("mat","tmin","map"),
+    pivot_longer(cols=c("mat","dh"),
                  names_to = "clim",
                  values_to = "clim_val")  |> 
     filter(!is.na(clim_val)) |> 
     group_by(species,clim) |>
-    mutate(opt=weighted.quantile(clim_val,1/cv_plot,prob=0.5)[1],
-           low=weighted.quantile(clim_val,1/cv_plot,prob=0.025)[1],#,probs=0.1)[1],
-           high=weighted.quantile(clim_val,1/cv_plot,prob=0.975)[1],
-           rhigh=weighted.quantile(clim_val,1/cv_plot, prob = 1- min(5, n())/n())[1],
-           rlow=weighted.quantile(clim_val,1/cv_plot, prob = min(5, n())/n())[1]) |> 
-    ungroup()
+    summarise(#opt=weighted.quantile(clim_val,1/cv_plot,prob=0.5)[1],
+      qlow=weighted.quantile(clim_val,1/cv_plot,prob=0.025)[1],#,probs=0.1)[1],
+      qhigh=weighted.quantile(clim_val,1/cv_plot,prob=0.975)[1],
+      qrange.mastif=qhigh-qlow,
+      rhigh=weighted.quantile(clim_val,1/cv_plot, prob = 1- min(5, n())/n())[1],
+      rlow=weighted.quantile(clim_val,1/cv_plot, prob = min(5, n())/n())[1],
+      rrange.mastif=rhigh-rlow) |> 
+    ungroup() |> 
+    pivot_longer(cols=c("qlow","qhigh","rhigh","rlow"),
+                 names_to = "limit",
+                 values_to = "value_mastif") |> 
+    mutate(range.mastif=case_when(grepl("q",limit)~qrange.mastif,
+                                  grepl("r",limit)~rrange.mastif)) |> 
+    select(-qrange.mastif,-rrange.mastif)
   
-  df.tree.weight |>
-    # format to match df.niche 
-    dplyr::select(species,clim,low,high) |> unique() |> 
-    pivot_wider(names_from = "clim",
-                values_from = c("high","low"), #"opt",
-                names_sep = ".") |> 
-    pivot_longer(cols=-species,
+  nfi.species.niche<-rbind(fecundity.eu_clim,
+                           fecundity.am_clim) |> 
+    mutate(dh=12*pet-map) |> 
+    filter(BA!=0) |> 
+    filter(dh>(-2500)) |>
+    pivot_longer(cols=c("mat","dh"),
                  names_to = "clim",
-                 values_to = "clim_obs") |> 
-    mutate(clim=paste0(str_split_i(clim,"\\.",2),".",str_split_i(clim,"\\.",1))) -> mastif.range.quant
-  
-  df.tree.weight |>
-    # format to match df.niche 
-    dplyr::select(species,clim,rlow,rhigh) |> unique() |> 
-    pivot_wider(names_from = "clim",
-                values_from = c("rhigh","rlow"), #"opt",
-                names_sep = ".") |> 
-    pivot_longer(cols=-species,
-                 names_to = "clim",
-                 values_to = "clim_obs") |> 
-    mutate(clim=paste0(str_split_i(clim,"\\.",2),".",str_split_i(clim,"\\.",1))) -> mastif.range.rank
-    #merge with gbif climate
-  (mastif.range.quant |> 
-    left_join(df.niche,by=c("species","clim")) |> 
-    relocate(species_l,.after=species)|> 
-    separate(clim,into=c("var","quant"),remove=FALSE) |> 
-    relocate(var,.after=species_l) |> 
-  # merge climate range
-    left_join(df.range,by=c("species","var")) |> 
-    # filter(!is.na(species_l)) |> 
-    mutate(dif=case_when(grepl("high",clim)~100*(clim_obs-clim_niche)/range,
-                         grepl("low",clim)~100*(clim_niche-clim_obs)/range)) |> 
-    filter(dif<(-50)|is.na(dif)) |> # filter out large difference and also
-      # species for which there is no data in GBIF
-    dplyr::select(species) |> unique())$species->sp.deleted.quant
-  (mastif.range.rank |> 
-      left_join(df.niche,by=c("species","clim")) |> 
-      relocate(species_l,.after=species)|> 
-      separate(clim,into=c("var","quant"),remove=FALSE) |> 
-      relocate(var,.after=species_l) |> 
-      # merge climate range
-      left_join(df.range,by=c("species","var")) |> 
-      # filter(!is.na(species_l)) |> 
-      mutate(dif=case_when(grepl("high",clim)~100*(clim_obs-clim_niche)/range,
-                           grepl("low",clim)~100*(clim_niche-clim_obs)/range)) |> 
-      filter(dif<(-50)|is.na(dif)) |> # filter out large difference and also
-      # species for which there is no data in GBIF
-      dplyr::select(species) |> unique())$species->sp.deleted.rank
+                 values_to = "clim_val")  |> 
+    filter(!is.na(clim_val)) |> 
+    group_by(species,clim) |>
+    summarise(#opt=weighted.quantile(clim_val,BA,prob=0.5)[1],
+      qlow=weighted.quantile(clim_val,BA,prob=0.025)[1],#,probs=0.1)[1],
+      qhigh=weighted.quantile(clim_val,BA,prob=0.975)[1],
+      qrange.nfi=qhigh-qlow,
+      rhigh=weighted.quantile(clim_val,BA, prob = 1- min(5, n())/n())[1],
+      rlow=weighted.quantile(clim_val,BA, prob = min(5, n())/n())[1],
+      rrange.nfi=rhigh-rlow) |> 
+    ungroup() |> 
+    pivot_longer(cols=c("qlow","qhigh","rhigh","rlow"),
+                 names_to = "limit",
+                 values_to = "value_nfi") |> 
+    mutate(range.nfi=case_when(grepl("q",limit)~qrange.nfi,
+                               grepl("r",limit)~rrange.nfi)) |> 
+    select(-qrange.nfi,-rrange.nfi)
   
   
-  df.species.select=rbind(mastif.range.quant,
-                          mastif.range.rank) |> 
-    left_join(df.species) |> 
-    pivot_wider(names_from = "clim",
-                values_from = "clim_obs") |> 
-    mutate(select.quant=(!species %in% sp.deleted.quant),
-           select.rank=(!species %in% sp.deleted.rank))
+  mastif.species.niche |> 
+    left_join(nfi.species.niche,by=c("species","clim","limit")) |> 
+    filter(!is.na(range.nfi)) |> 
+    mutate(dev=case_when(grepl("high",limit)~100*(value_mastif-value_nfi)/range.nfi,
+                         grepl("low",limit)~100*(value_nfi-value_mastif)/range.nfi)) |> 
+    filter(grepl("r",limit)) |> 
+    filter(dev>(-50)) |> 
+    select(species) |> unique() |> pull() -> select.rank
+  mastif.species.niche |> 
+    left_join(nfi.species.niche,by=c("species","clim","limit")) |> 
+    filter(!is.na(range.nfi)) |> 
+    mutate(dev=case_when(grepl("high",limit)~100*(value_mastif-value_nfi)/range.nfi,
+                         grepl("low",limit)~100*(value_nfi-value_mastif)/range.nfi)) |> 
+    filter(grepl("q",limit)) |> 
+    filter(dev>(-50)) |> 
+    select(species) |> unique() |> pull() -> select.quant
   
-  return(list(df.gbif=df.niche,
-              df.tree_w=df.tree.weight,
-              df.select=df.species.select))
+  return(list(select.rank=select.rank,
+              select.quant=select.quant))
 }
-
 
 
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
