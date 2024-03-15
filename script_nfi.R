@@ -13,7 +13,7 @@ tar_option_set(packages = c("stringr","ggplot2","tidyr","dplyr","terra","factoex
 
 mastif.eu=tar_read(mastif.eu,store = "target_data")
 mastif.am=tar_read(mastif.am,store = "target_data")
-meanClimate_species=tar_read(meanClimate_species,store="target_gbif")
+# meanClimate_species=tar_read(meanClimate_species,store="target_gbif")
 
 #Targets
 list(
@@ -108,19 +108,20 @@ list(
     format="file"
   ),
   tar_target(
-    species.phylo,
+    species.phylo, # phylogeny of Mastif species
     readRDS(species.phylo.file)
   ),
   tar_target(
-    species_class,
+    species_class, #classification of nfi species
     class_species(fecundity.am_clim,
                   fecundity.eu_clim)
   ),
   tar_target(
     phylo.select,
     species.phylo |>
-      filter(species %in% species_selection$select.quant) |> 
-      left_join(species_class)
+      inner_join(species_class) |>  # keep only species present in nfi and mastif
+      filter(species %in% species_selection$select.quant) # filter selection
+      
   ),
   NULL
 )

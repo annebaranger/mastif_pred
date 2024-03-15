@@ -209,7 +209,7 @@ fit.continent.discrete.excl<-function(data_fit,
                    ISP=fec_cont$dISP,
                    X=X)
     
-    fit.lm <- stan(file = "stan/lmm_dif.stan",
+    fit <- stan(file = "stan/lmm_dif.stan",
                 data=data_list,
                 iter=1000,
                 chains=3,
@@ -575,8 +575,9 @@ fit.biome.discrete<-function(data_fit,
 
 
 fit.species <- function(data_fit,
-                        model.type,
+                        # model.type,
                         folder){
+  if(!dir.exists(folder)) dir.create(folder)
   fec_species<-data_fit |>  
     group_by(species) |>
     mutate(mid_isp=median(ISP)[[1]],
@@ -611,7 +612,7 @@ fit.species <- function(data_fit,
                      ISP=sp.mod$dISP,
                      X=X,
                      NULL)
-      fit <- stan(file = "lmm_species.stan",
+      fit <- stan(file = "stan/lmm_species.stan",
                   data=data_sp,
                   iter=1000,
                   chains=3,

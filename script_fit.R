@@ -7,10 +7,13 @@ library(targets)
 
 #Options
 source("R/functions_fit.R")
-options(tidyverse.quiet = TRUE)
-tar_option_set(packages = c("stringr","ggplot2","tidyr","dplyr","terra","factoextra","modi","tibble","mastif","rstan"),
-               error = "continue") 
-
+options(tidyverse.quiet = TRUE, clustermq.scheduler = "multiprocess")
+tar_option_set(packages = c("stringr","ggplot2","tidyr","dplyr","terra",
+                            "factoextra","modi","tibble","mastif","rstan",
+                            "future"),
+               error = "continue",
+               memory = "transient") 
+future::plan(future::multisession, workers = 6)
 fecundity.eu_clim=tar_read(fecundity.eu_clim,store="target_nfi")
 fecundity.am_clim=tar_read(fecundity.am_clim,store="target_nfi")
 phylo.select=tar_read(phylo.select,store="target_nfi")
@@ -39,14 +42,14 @@ list(
              species_selection$select.quant,
              thresh=0.1)
   ),
-  tar_target(
-    fecundity.fit.05,
-    raw_data(fecundity.eu_clim,
-             fecundity.am_clim,
-             species_selection$select.quant,
-             phylo.zone,
-             thresh=0.05)
-  ),
+  # tar_target(
+  #   fecundity.fit.05,
+  #   raw_data(fecundity.eu_clim,
+  #            fecundity.am_clim,
+  #            species_selection$select.quant,
+  #            phylo.zone,
+  #            thresh=0.05)
+  # ),
   tar_target(
     species.biome,
     get_biome(fecundity.fit.1)

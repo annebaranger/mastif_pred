@@ -93,8 +93,7 @@ get_specieslist <- function(species.list,block){
     mutate(species=paste0(substr(tolower(genus),1,8),substr(str_to_title(sp),1,8))) # recreate ID of mastif
   # create correspondence between ID and full species name
   species.code=species.world |> 
-    filter(species%in%species.list) |> 
-    mutate(block=block)
+    filter(species%in%species.list) 
   
   # add phylogeny
   classification(unique(species.code$TaxonName),db="gbif",rows=1)->out # get phylogeny from species names
@@ -109,11 +108,15 @@ get_specieslist <- function(species.list,block){
     mutate(taxa=case_when(class=="Pinopsida"~"gymnosperm",
                           class=="Magnoliopsida"~"angiosperm")) |>
     dplyr::select(species_l,genus,family,order,taxa) |> # select relevant fields
-    left_join(species.code[,c("TaxonName","species","block")],by=c("species_l"="TaxonName")) |>
+    left_join(species.code[,c("TaxonName","species")],by=c("species_l"="TaxonName")) |>
     unique()
+  all.species<-data.frame(species=species.list) |> 
+    left_join(species.phylo)|> 
+    mutate(block=block)
+  
   rm(out,out2)
   
-  return(species.phylo)
+  return(all.species)
 }
 
 
