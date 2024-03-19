@@ -2993,8 +2993,9 @@ tar_load(species.biome,store="target_fit")
 
 mastif.data<-rbind(tar_read(mastif.am,store="target_data")$df.tree,
                    tar_read(mastif.eu,store="target_data")$df.tree) |> 
-  group_by(species) |> 
+  group_by(species) |>
   summarise(n_treeyear=n())
+  # select(treeID) |> unique()
 
 rbind(fecundity.am_clim,
       fecundity.eu_clim) |> 
