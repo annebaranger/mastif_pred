@@ -3061,4 +3061,120 @@ ggsave( a,
 ```
 
 
+## method figure
+
+### north am
+```{r}
+ ecoregions=sf::read_sf(dsn="data/WWF/official", #read ecoregions
+                         layer="wwf_terr_ecos") |>
+    select(BIOME,ECO_NAME,geometry) |> 
+    filter(!BIOME%in%c(98,99)) |> 
+    mutate(ECO_NUM=as.numeric(as.factor(ECO_NAME)))
+  st_transform(crs="epsg:4326")
+
+
+bardensity=fecundity.am_clim |> filter(BA!=0,species=="abiesBalsamea") |> 
+  summarise(lat=mean(lat),
+            lon=mean(lon))
+barycenter= fecundity.am_clim |> filter(BA!=0,species=="abiesBalsamea") |> 
+  mutate(dh=map-pet) |> 
+  select(lat,lon,tempSite,dh,BA,cec30,slope,aspect) |> 
+  pivot_longer(cols=c(-"lat",-"lon")) |> 
+  group_by(name) |> 
+  filter(!is.na(value)) |> 
+  filter(value<quantile(value,probs = 0.99,na.rm=TRUE),
+         value>quantile(value,probs = 0.01,na.rm=TRUE)) |> 
+  mutate(value=0.1+(value-min(value,na.rm=TRUE))/(max(value,na.rm=TRUE)-min(value,na.rm=TRUE)) #,
+         # value=log(value)
+          )|>
+  # ggplot(aes(value))+
+  # geom_density()+
+  # facet_wrap(~name,scales="free")
+  summarize(lat_max=weighted.mean(lat,w=value,na.rm = TRUE),
+            lat_min=weighted.mean(lat,w=1-value,na.rm = TRUE),
+            lon_max=weighted.mean(lon,w=value,na.rm = TRUE),
+            lon_min=weighted.mean(lon,w=1-value,na.rm = TRUE),
+            lat_end=(lat_max-lat_min)*1.5+bardensity$lat[1],
+            lon_end=(lon_max-lon_min)*1.5+bardensity$lon[1])
+
+fecundity.am_clim %>%
+  filter(BA != 0, species == "abiesBalsamea") %>%
+  mutate(dh=map-pet) |> 
+  mutate(lISP = log(ISP / mean(ISP))) %>%
+  ggplot() +
+  geom_sf(data=ecoregions,aes(fill=ECO_NUM),alpha=0.2)+
+  scale_fill_gradientn(colours = wes_palette(type="continuous",name="GrandBudapest1"),
+                       guide="none")+
+  geom_point(aes(x = lon, y = lat, color = lISP),
+             size=0.2,
+             alpha = 0.4) +
+  scale_color_gradientn(colours = wes_palette(type="continuous",name="Zissou1")) +
+  new_scale_color() +  
+  geom_segment(data = barycenter,
+               aes(x = bardensity$lon[1], y = bardensity$lat[1]	, xend = lon_end, yend = lat_end, color = name),
+               linewidth = 1,
+               arrow = arrow(length = unit(0.3, 'cm'))) +
+  scale_colour_manual(values= c( "#9467bd","#8c564b","#2ca01c","#1f77b4","#d62728","#ff7f0e"))+
+  # scale_colour_manual(values=wes_palette(n=6,name="Zissou1",type="continuous"))+
+  geom_point(data=bardensity,aes(x=lon,y=lat),color="grey1",size=2)+
+  ylim(c(35, 60)) + xlim(c(-120, -55))+
+  labs
+```
+
+
+### europe
+```{r}
+ ecoregions=sf::read_sf(dsn="data/WWF/official", #read ecoregions
+                         layer="wwf_terr_ecos") |>
+    select(BIOME,ECO_NAME,geometry) |> 
+    filter(!BIOME%in%c(98,99)) |> 
+    mutate(ECO_NUM=as.numeric(as.factor(ECO_NAME)))
+  st_transform(crs="epsg:4326")
+
+
+bardensity=fecundity.eu_clim |> filter(BA!=0,species=="abiesAlba") |> 
+  summarise(lat=mean(lat),
+            lon=mean(lon))
+barycenter= fecundity.eu_clim |> filter(BA!=0,species=="abiesAlba") |> 
+  mutate(dh=map-pet) |> 
+  select(lat,lon,tempSite,dh,BA,cec30,slope,aspect) |> 
+  pivot_longer(cols=c(-"lat",-"lon")) |> 
+  group_by(name) |> 
+  filter(!is.na(value)) |> 
+  filter(value<quantile(value,probs = 0.99,na.rm=TRUE),
+         value>quantile(value,probs = 0.01,na.rm=TRUE)) |> 
+  mutate(value=0.1+(value-min(value,na.rm=TRUE))/(max(value,na.rm=TRUE)-min(value,na.rm=TRUE)) #,
+         # value=log(value)
+          )|>
+  # ggplot(aes(value))+
+  # geom_density()+
+  # facet_wrap(~name,scales="free")
+  summarize(lat_max=weighted.mean(lat,w=value,na.rm = TRUE),
+            lat_min=weighted.mean(lat,w=1-value,na.rm = TRUE),
+            lon_max=weighted.mean(lon,w=value,na.rm = TRUE),
+            lon_min=weighted.mean(lon,w=1-value,na.rm = TRUE),
+            lat_end=(lat_max-lat_min)*2.5+bardensity$lat[1],
+            lon_end=(lon_max-lon_min)*2.5+bardensity$lon[1])
+
+fecundity.eu_clim |> filter(BA!=0,species=="pinusSylvestr") |> 
+  mutate(dh=map-pet) |> 
+  mutate(lISP = log(ISP / mean(ISP))) %>%
+  ggplot() +
+  geom_sf(data=ecoregions,aes(fill=ECO_NUM),alpha=0.2)+
+  scale_fill_gradientn(colours = wes_palette(type="continuous",name="GrandBudapest1"),
+                       guide="none")+
+  geom_point(aes(x = lon, y = lat, color = tempSite),
+             size=0.2,
+             alpha = 0.4) +
+  scale_color_gradientn(colours = wes_palette(type="continuous",name="Zissou1")) +
+  new_scale_color() +  
+  geom_segment(data = barycenter,
+               aes(x = bardensity$lon[1], y = bardensity$lat[1]	, xend = lon_end, yend = lat_end, color = name),
+               linewidth = 1,
+               arrow = arrow(length = unit(0.3, 'cm'))) +
+  scale_colour_manual(values= c( "#9467bd","#8c564b","#2ca01c","#1f77b4","#d62728","#ff7f0e"))+
+  # scale_colour_manual(values=wes_palette(n=6,name="Zissou1",type="continuous"))+
+  geom_point(data=bardensity,aes(x=lon,y=lat),color="grey1",size=2)+
+  ylim(c(35, 70)) + xlim(c(-10, 35))
+```
 
