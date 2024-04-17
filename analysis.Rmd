@@ -3177,30 +3177,24 @@ fecundity.eu_clim |> filter(BA!=0,species=="pinusSylvestr") |>
 #### North AM
 
 ```{r}
-data.pca=fecundity.am_clim |> filter(BA!=0,species=="acerRubrum") |> 
-  mutate(dh=map-pet) |> 
-  select(lat,lon,tempSite,dh,BA,cec30,slope,aspect,ISP) |> 
-  drop_na()
-pca=prcomp(data.pca[,c("tempSite","dh","BA","cec30","slope","aspect")],scale=TRUE)
+library(wesanderson)
+ecoregions=sf::read_sf(dsn="data/WWF/official", #read ecoregions
+                         layer="wwf_terr_ecos") |>
+    select(BIOME,ECO_NAME,geometry) |> 
+    filter(!BIOME%in%c(98,99)) |> 
+    mutate(ECO_NUM=as.numeric(as.factor(ECO_NAME)))
 
-  
-  pca.plot=fviz_pca(acp,
-           axes=c(1,2),
-           # geom.ind="point",
-           geom.var=c("arrow","text"),
-           # palette=c("firebrick1","slateblue","firebrick4"),
-           # habillage=clim.acp$species,
-           col.var="black",
-           col.ind=NA,
-           alpha.ind=0.05,
-           # addEllipses=TRUE,
-           )+
-    theme(legend.position = "none")+
-    geom_point(data=as.data.frame(pred),aes(x=PC1,y=PC2,color=species))+
-    ggtitle( label = str_to_title(z))+
-    theme(plot.title = element_text(hjust=0.48))
-    # labs(color="Geographical \nzone",
-  
+data.pca=fecundity.am_clim |> filter(BA!=0,species=="acerRubrum") |> 
+  mutate(`Moisture deficit`=map-pet) |> 
+  select(lat,lon,tempSite,"Moisture deficit",BA,cec30,slope,aspect,ISP) |> 
+  rename(Temperature=tempSite,
+         `Basal area`=BA,
+         CEC=cec30,
+         Aspect=aspect,
+         Slope=slope) |> 
+  drop_na()
+pca=prcomp(data.pca[,c("Temperature","Moisture deficit","Basal area","CEC","Slope","Aspect")],scale=TRUE)
+
 fviz_pca_var(pca,
            axes=c(1,2),
            geom.var=c("arrow","text"),
@@ -3210,16 +3204,25 @@ fviz_pca_var(pca,
            col.circle = NA
            ) +
   common_theme+
-  theme(panel.grid = element_blank() )+
+  theme(panel.grid = element_blank(),
+        plot.title = element_text(hjust = 0,size=10))+
   ylim(c(-1,0.1))+
-  labs(title = "")+
-  coord_fixed(ratio=1/2)->a
+  labs(title = "A. PCA of MASTIF covariates")+
+  coord_fixed(ratio=1/2) ->a
+
+mastif.point=mastif.am$df.alltree |>
+  filter(species=="acerRubrum") |> 
+  select(plotID,species,lon,lat) |> 
+  unique()
 
 cbind(data.pca,
       predict(pca,data.pca)) |>
   # sample_n(1000) |> 
   mutate(lISP = scale(log(ISP / mean(ISP)))) %>%
-  pivot_longer(cols=c("lISP","PC1","PC2")) |> 
+  rename(`B. Relative Fecundity`=lISP,
+         `C. PCA axis 1`=PC1,
+         `D. PCA axis 2`=PC2) |> 
+  pivot_longer(cols=c("B. Relative Fecundity","C. PCA axis 1","D. PCA axis 2")) |> 
   group_by(name) |> 
   filter(value>quantile(value,probs=0.05),
          value<quantile(value,probs=0.95)) |> 
@@ -3228,22 +3231,52 @@ cbind(data.pca,
   geom_point(aes(x = lon, y = lat, color = value),
              size=0.2,
              alpha = 0.4) +
+  geom_point(data=mastif.point,
+             aes(x=lon,y=lat),
+             size=0.8,
+             alpha=1,
+             color="grey10") +
   scale_color_gradientn(colours = wes_palette(type="continuous",name="Zissou1")) +
   ylim(c(25, 50)) + xlim(c(-100, -65))+
   facet_wrap(~name)+
   theme(axis.text = element_blank(),
         axis.title = element_blank(),
         panel.grid=element_blank(),
-        legend.position="left")+
+        legend.position="left",
+        strip.text = element_text(hjust = 0, size = 10))+
   # common_theme+
-  labs(color="")-> b
+  labs(color="")->b
 
 cowplot::plot_grid(a,b,nrow=2)->plot
-# ggsave( plot,
-#         filename = "speciesex.png",
-#         dpi = 600,
-#         width = 15,
-#         height=12,
-#         units = "cm")
+ggsave( plot,
+        filename = "speciesex.png",
+        dpi = 600,
+        width = 15,
+        height=12,
+        units = "cm")
+```
+
+```{r}
+cbind(data.pca,
+      predict(pca,data.pca)) |>
+  # sample_n(1000) |> 
+  mutate(lISP = scale(log(ISP / mean(ISP)))) %>%
+  ggplot() +
+  geom_sf(data=ecoregions,fill="#e9ecef")+
+  geom_point(aes(x = lon, y = lat, color = lISP),
+             size=0.2,
+             alpha = 0.4) +
+  geom_point(data=mastif.point,
+             aes(x=lon,y=lat),
+             size=0.2,
+             color="black") +
+  scale_color_gradientn(colours = wes_palette(type="continuous",name="Zissou1")) +
+  ylim(c(25, 50)) + xlim(c(-100, -65))+
+  theme(axis.text = element_blank(),
+        axis.title = element_blank(),
+        panel.grid=element_blank(),
+        legend.position="left")+
+  # common_theme+
+  labs(color="")
 ```
 
