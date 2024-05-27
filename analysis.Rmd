@@ -2415,7 +2415,7 @@ fitbiomecontinuous |>
        y="Log ratio of fecundity \n relative to the species mean")-> a
 
 ggsave( a,
-        filename = "fig2.1.pdf",
+        filename = "fig2.2.pdf",
         dpi = 600,
         width = 12,
         height=7,
@@ -2778,9 +2778,9 @@ p
 ### aridity effect - continuous
 
 ```{r}
-load("model/biome_continous/anova_5.RData")
+load("model/biome_continous_25/anova_4.RData")
 as.data.frame(fit) |> select(c("beta[4]","beta[6]")) |>
-  mutate(slope=`beta[4]`+`beta[6]`) |> summary()
+  mutate(slope=`beta[4]`+`beta[6]`) |> summarise(mean=mean(slope),q05=quantile(slope,probs = 0.05),q95=quantile(slope,probs = 0.95))
 summary(fit)$summary[c("beta[4]","beta[6]"),c(1,4,8)]
 fitbiomecontinuous |> 
   mutate(biome=case_when(biome==4~"Temperate deciduous",
@@ -2812,7 +2812,7 @@ fitbiomecontinuous |>
 a
 
 # ggsave( a,
-#         filename = "fig3.1.png",
+#         filename = "fig3.2.png",
 #         dpi = 600,
 #         width = 10,
 #         height=15,
