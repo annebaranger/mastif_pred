@@ -19,12 +19,12 @@ list(
   ),
   tar_target(
     mastif.eu,
-    get_mastif(dir.data="data/mastif_plots/fittedFecundityMastifEurope.rdata",
+    get_mastif(dir.data="data/mastif_plots/fit_2024/europe.rdata",  #old fits "data/mastif_plots/fittedFecundityMastifEurope.rdata",
                clim_list)
   ),
   tar_target(
     mastif.am,
-    get_mastif(dir.data="data/mastif_plots/fittedFecundityMastifNorthAmerica.rdata",
+    get_mastif(dir.data="data/mastif_plots/fit_2024/northAmerica.rdata", #old fits "data/mastif_plots/fittedFecundityMastifNorthAmerica.rdata",
                clim_list)
   ),
   tar_target(

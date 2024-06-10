@@ -3183,7 +3183,108 @@ ecoregions=sf::read_sf(dsn="data/WWF/official", #read ecoregions
     select(BIOME,ECO_NAME,geometry) |> 
     filter(!BIOME%in%c(98,99)) |> 
     mutate(ECO_NUM=as.numeric(as.factor(ECO_NAME)))
+tar_load(mastif.am,store="target_data")
 
+# load("data/america/inventory/pet.rdata")
+# load("data/america/inventory/prec.rdata")
+load("data/america/inventory/def.rdata") # moisture deficit
+mean.def=apply(def, MARGIN = 1,mean) |> as.data.frame() |> tibble::rownames_to_column()
+colnames(mean.def)=c("plot","moisture_deficit")
+
+load("data/america/inventory/temp.rdata") # temperature
+mean.temp=apply(temp, MARGIN = 1,mean) |> as.data.frame() |> tibble::rownames_to_column()
+colnames(mean.temp)=c("plot","temperature")
+rm(temp,def)
+
+load("data/america/inventory/plotData.rdata") # moisture deficit
+allPlots<-plotData |> 
+  left_join(mean.def) |> 
+  left_join(mean.temp)
+
+load("data/america/inventory/stemData.rdata")
+load("data/america/inventory/ISP.rdata")
+ISP=as.data.frame(ISP) |> 
+  tibble::rownames_to_column(var="plot") |> 
+  select(plot,acerRubrum) |> 
+  filter(acerRubrum!=0)
+colnames(ISP)=c("plot","ISP")
+stemAcerRubrum<-stemData |> 
+  filter(species=="acerRubrum") |> 
+  group_by(plot) |> 
+  summarize(mean.diam=mean(diam),
+            mean.shade=mean(shade)) |> 
+  left_join(allPlots,by="plot") |> 
+  left_join(ISP,by="plot") |> 
+  select(plot,lat,lon,mean.diam,mean.shade,moisture_deficit,temperature,cec30,slope,aspect,ISP) |> 
+  rename(Temperature=temperature,
+         `Moisture deficit`=moisture_deficit,
+         `Mean diameter`=mean.diam,
+         `Mean shade index`=mean.shade,
+         CEC=cec30,
+         Aspect=aspect,
+         Slope=slope) |> 
+  drop_na()
+pca=prcomp(stemAcerRubrum[,c("Temperature","Moisture deficit","Mean diameter","Mean shade index","CEC","Slope","Aspect")],scale=TRUE)
+
+fviz_pca_var(pca,
+           axes=c(1,2),
+           geom.var=c("arrow","text"),
+           col.var="black",
+           col.ind=NA,
+           alpha.ind=0.05,
+           col.circle = NA
+           ) +
+  common_theme+
+  theme(panel.grid = element_blank(),
+        plot.title = element_text(hjust = 0,size=10))+
+  # ylim(c(-1,0.1))+
+  labs(title = "A. PCA of MASTIF covariates")+
+  coord_fixed(ratio=1/2) ->a
+
+mastif.point=mastif.am$df.alltree |>
+  filter(species=="acerRubrum") |> 
+  select(plotID,species,lon,lat) |> 
+  unique()
+
+cbind(stemAcerRubrum,
+      predict(pca,stemAcerRubrum)) |>
+  # sample_n(1000) |> 
+  mutate(lISP = scale(log(ISP / mean(ISP)))) %>%
+  # mutate(lfec = scale(log(fecGmMu/ mean(fecGmMu)))) %>%
+  rename(`B. Mean Fecundity`=lISP,
+         `C. PCA axis 1`=PC1,
+         `D. PCA axis 2`=PC2) |> 
+  pivot_longer(cols=c("B. Mean Fecundity","C. PCA axis 1","D. PCA axis 2")) |> 
+  group_by(name) |> 
+  filter(value>quantile(value,probs=0.05),
+         value<quantile(value,probs=0.95)) |> 
+  ggplot() +
+  geom_sf(data=ecoregions,fill="#e9ecef")+
+  geom_point(aes(x = lon, y = lat, color = value),
+             size=0.2,
+             alpha = 0.4) +
+  geom_point(data=mastif.point,
+             aes(x=lon,y=lat),
+             size=0.8,
+             alpha=1,
+             color="grey10") +
+  scale_color_gradientn(colours = wes_palette(type="continuous",name="Zissou1")) +
+  ylim(c(25, 50)) + xlim(c(-100, -65))+
+  facet_wrap(~name)+
+  theme(axis.text = element_blank(),
+        axis.title = element_blank(),
+        panel.grid=element_blank(),
+        legend.position="left",
+        strip.text = element_text(hjust = 0, size = 10))+
+  # common_theme+
+  labs(color="")->b
+
+cowplot::plot_grid(a,b,nrow=2)->plot
+
+```
+
+
+```{r}
 data.pca=fecundity.am_clim |> filter(BA!=0,species=="acerRubrum") |> 
   mutate(`Moisture deficit`=map-pet) |> 
   select(lat,lon,tempSite,"Moisture deficit",BA,cec30,slope,aspect,ISP) |> 

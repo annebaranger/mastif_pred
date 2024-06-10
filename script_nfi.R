@@ -11,8 +11,8 @@ options(tidyverse.quiet = TRUE)
 tar_option_set(packages = c("stringr","ggplot2","tidyr","dplyr","terra","factoextra","modi","tibble","mastif"),
                error = "continue") 
 
-mastif.eu=tar_read(mastif.eu,store = "target_data")
-mastif.am=tar_read(mastif.am,store = "target_data")
+mastif.eu=tar_read(mastif.eu,store = "target_data_2")
+mastif.am=tar_read(mastif.am,store = "target_data_2")
 # meanClimate_species=tar_read(meanClimate_species,store="target_gbif")
 
 #Targets
@@ -25,11 +25,13 @@ list(
   tar_target(
     df.nfi.eu,
     get_nfi(clim_list,
+            fit="fit2024",
             continent="europe")
   ),
   tar_target(
     df.nfi.am,
     get_nfi(clim_list,
+            fit="fit2024",
             continent="america")
   ),
   
@@ -49,11 +51,13 @@ list(
   tar_target(
     fec.eu,
     get_fecundity(continent="europe",
+                  fit="fit2024",
                   mastif.eu$df.species.select$species)
   ),
   tar_target(
     fec.am,
     get_fecundity(continent="america",
+                  fit="fit2024",
                   mastif.am$df.species.select$species)
   ),
   

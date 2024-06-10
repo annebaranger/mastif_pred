@@ -12,6 +12,11 @@
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 
+loadRData <- function(fileName){
+  #loads an RData file, and returns it
+  load(fileName)
+  get(ls()[ls() != "fileName"])
+}
 
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 #### Section 1 - MASTIF data collection ####
@@ -41,7 +46,7 @@ get_mastif <- function(dir.data=dir.data,
   #   fecundityPred_i=bind_rows(fecundityPred_i,
   #                             fecundityPred)
   # }
-  load(dir.data)
+  fecundityPred=loadRData(dir.data)
   fecundityPred<-fecundityPred |> 
     tibble::rownames_to_column(var="ID") |> 
     separate(ID,into=c("treeID","year"),sep="_",remove=FALSE) |> 
@@ -362,6 +367,7 @@ get_climate<-function(clim_list=list(mat="data/CHELSA/CHELSA_bio1_1981-2010_V.2.
 #' @param clim_list climatic variable list
 #' @param continent wether "europe" or "america"
 get_nfi <- function(clim_list,
+                    fit,
                     continent){
   # load clim
   clim=rast(lapply(names(clim_list),
@@ -373,13 +379,14 @@ get_nfi <- function(clim_list,
   )
   )
   #load plotData.rdata
-  nfi.file=paste0("data/",continent,"/plotData.rdata")
-  size.file=paste0("data/",continent,"/SIZE.rdata")
+  nfi.file=paste0("data/",continent,"/",fit,"/plotData.rdata")
+  size.file=paste0("data/",continent,"/",fit,"/SIZE.rdata")
   load(nfi.file)
   load(size.file)
   SIZE=as.data.frame(SIZE) |> 
     rownames_to_column(var="plot")
   plotData<-plotData |> 
+    rownames_to_column(var="plot") |> 
     left_join(SIZE,by="plot")
   df.nfi<-cbind(plotData,
                 extract(clim,
@@ -425,9 +432,10 @@ compute_margin<-function(df.nfi.clim,
 #' @param continent
 #' @param sp.select
 get_fecundity <- function(continent,
+                          fit,
                           sp.select){
   # load BA
-  load(paste0("data/",continent,"/BA.rdata"))
+  load(paste0("data/",continent,"/",fit,"/BA.rdata"))
   BA<-as.data.frame(BA)|> 
     rownames_to_column(var="plot") |> 
     dplyr::select(plot,matches(sp.select)) |> 
@@ -436,7 +444,7 @@ get_fecundity <- function(continent,
                  values_to = "BA")
   
   #load ISP
-  load(paste0("data/",continent,"/ISP.rdata"))
+  load(paste0("data/",continent,"/",fit,"/ISP.rdata"))
   ISP<-as.data.frame(ISP)|> 
     rownames_to_column(var="plot") |> 
     dplyr::select(plot,matches(sp.select)) |> 
@@ -445,14 +453,14 @@ get_fecundity <- function(continent,
                  values_to = "ISP")
   
   #load fecgmmu&sd
-  load(paste0("data/",continent,"/fecGmSd.rdata"))
+  load(paste0("data/",continent,"/",fit,"/fecGmSd.rdata"))
   fecGmSd<-as.data.frame(summary)|> 
     rownames_to_column(var="plot") |> 
     dplyr::select(plot,matches(sp.select)) |> 
     pivot_longer(cols=-plot,
                  names_to = "species",
                  values_to = "fecGmSd")
-  load(paste0("data/",continent,"/fecGmMu.rdata"))
+  load(paste0("data/",continent,"/",fit,"/fecGmMu.rdata"))
   fecGmMu<-as.data.frame(summary)|> 
     rownames_to_column(var="plot") |> 
     dplyr::select(plot,matches(sp.select)) |> 
@@ -469,7 +477,7 @@ get_fecundity <- function(continent,
            fecGmSd=na_if(fecGmSd,0),
            ISP=na_if(ISP,0)) |> 
     group_by(species) |> 
-    mutate(n=sum(BA>0)) |> filter(n>200) |> 
+    mutate(n=sum(BA>0,na.rm = TRUE)) |> filter(n>200) |> 
     group_by(plot,species) |> 
     mutate(n_plot=n(),
            fecGmMu_plot=mean(fecGmMu,na.rm=TRUE),
