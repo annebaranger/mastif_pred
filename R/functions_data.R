@@ -392,7 +392,8 @@ get_nfi <- function(clim_list,
                 extract(clim,
                         y=data.frame(x=plotData$lon,
                                      y=plotData$lat))[,-1]) |> 
-    mutate(wai=(map-12*pet)/(12*pet))
+    mutate(wai=(map-12*pet)/(12*pet),
+           def)
   
   return(df.nfi)
 }
@@ -507,6 +508,94 @@ class_species <- function(fecundity.am_clim,
                           mean_lon<(-97)~"west",
                           TRUE~"east"))
   return(species_cat)
+}
+
+
+get_nfipred_plot<-function(continent="europe",
+                           fit="fit2024"){
+    ## plotdata
+    plotData<-loadRData(file.path("data",continent,"inventory","plotData.rdata")) |> 
+      tibble::rownames_to_column(var="plot")
+    
+    ## pet, deficit, temperature
+    pet <- apply(loadRData(file.path("data",continent,"inventory","pet.rdata")),
+                 MARGIN = 1,
+                 mean) |> 
+      as.data.frame() |>  tibble::rownames_to_column()
+    colnames(pet)=c("plot","pet")
+    temp <- apply(loadRData(file.path("data",continent,"inventory","temp.rdata")),
+                 MARGIN = 1,
+                 mean) |> 
+      as.data.frame() |>  tibble::rownames_to_column()
+    colnames(temp)=c("plot","temp")
+    prec <- apply(loadRData(file.path("data",continent,"inventory","prec.rdata")),
+                  MARGIN = 1,
+                  mean) |> 
+      as.data.frame() |>  tibble::rownames_to_column()
+    colnames(prec)=c("plot","prec")
+    def <- apply(loadRData(file.path("data",continent,"inventory","def.rdata")),
+                 MARGIN = 1,
+                 mean) |> 
+      as.data.frame()|>  tibble::rownames_to_column()
+    colnames(def)=c("plot","def")
+    size<-loadRData(file.path("data",continent,fit,"SIZE.rdata")) |> 
+      as.data.frame() |>
+      tibble::rownames_to_column(var="plot")
+    colnames(size)=c("plot","size","cv_size")
+    # gather
+    list_tab=list(pet,temp,prec,def,size)
+    names(list_tab)=c("pet","temp","prec","def","size")
+    for(df in names(list_tab)){
+      if(sum(list_tab[[df]][["plot"]]!=plotData[["plot"]])==0){
+        plotData=cbind(plotData,list_tab[[df]][df])
+      }else(
+        plotData<-plotData |> left_join(list_tab[[df]],by="plot")
+      )
+    }
+    
+    # structure data
+    BA=loadRData(file.path("data",continent,fit,"BA.rdata")) |> 
+      as.data.frame() |>
+      tibble::rownames_to_column(var="plot")
+    fecGmMu=loadRData(file.path("data",continent,fit,"fecGmMu.rdata")) |> 
+      as.data.frame() |>
+      tibble::rownames_to_column(var="plot")
+    fecGmSd=loadRData(file.path("data",continent,fit,"fecGmSd.rdata")) |> 
+      as.data.frame() |>
+      tibble::rownames_to_column(var="plot")
+    ISP=loadRData(file.path("data",continent,fit,"ISP.rdata")) |> 
+      as.data.frame() |>
+      tibble::rownames_to_column(var="plot")
+    list_tab=list(BA,fecGmMu,fecGmSd,ISP)
+    names(list_tab)=c("BA","fecGmMu","fecGmSd","ISP")
+    plotData<-plotData |> crossing(species=sp.select)
+    for(df in c("BA","fecGmMu","fecGmSd","ISP")){
+        df_long<-list_tab[[df]] |> 
+          dplyr::select(plot,matches(sp.select)) |> 
+          pivot_longer(cols = -plot,
+                       names_to = "species",
+                       values_to = "value") %>%
+          filter(!is.na(value)) %>%
+          rename_with(~df, .cols = value)
+        plotData<-left_join(plotData,df_long,by=c("plot","species"))
+    }
+    
+    plotData<-plotData |>
+      mutate(fecGmMu=na_if(fecGmMu,0),
+             fecGmSd=na_if(fecGmSd,0),
+             ISP=na_if(ISP,0)) |>  
+      filter(!is.na(ISP)) |> 
+      group_by(species) |> 
+      mutate(n=sum(BA>0,na.rm = TRUE)) |> filter(n>200) |> 
+      group_by(plot,species) |> 
+      mutate(n_plot=n(),
+             fecGmMu_plot=mean(fecGmMu,na.rm=TRUE),
+             se_plot=sqrt(sum(fecGmSd^2)/n_plot),
+             cv_plot=se_plot/fecGmMu_plot) |> 
+      # Compute mean of se per plot
+      ungroup()
+    
+    return(plotData)
 }
 
 #' Get temporal variability
