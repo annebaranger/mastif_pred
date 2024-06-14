@@ -33,9 +33,9 @@ raw_data <- function(fecundity.eu_clim,
   fec_tot=rbind(fecundity.eu_clim |> mutate(block="europe"),
                 fecundity.am_clim|> mutate(block="america")) |>
     left_join(phylo.select) |>
-    dplyr::select(plot,lon,lat,taxa,genus,species,BA,ISP,fecGmMu,fecGmSd,sgdd,wai,pet,map,mat,block,zone) |>
+    dplyr::select(plot,lon,lat,taxa,genus,species,BA,ISP,fecGmMu,fecGmSd,dh,pet,map,mat,block,zone) |>
     filter(BA!=0) |> #rm absences
-    mutate(dh=12*pet-map) |> 
+    # mutate(dh=12*pet-map) |> 
     filter(!is.na(ISP)) |> 
     filter(species %in% species_selection) |> 
     group_by(species) |> 
@@ -178,7 +178,8 @@ fit.continent.discrete.excl<-function(data_fit,
   
   fec_cont |> 
     filter(!is.na(dh)) |> 
-    group_by(species) |>
+    mutate(dh=12*(pet-map)) |> 
+    group_by(species) |> 
     mutate(dh.cat=cut(dh,breaks = seq(min(dh),max(dh),by=100)),
            cormatdh=cor(mat,dh,use="complete")) |>
     group_by(species,cormatdh,margin.temp,dh.cat) |> 
@@ -289,6 +290,7 @@ fit.continent.continous<-function(data_fit,
     
     if(excluded==TRUE){
       sp.zone |> 
+        mutate(dh_old=12*dh_old) |> #because expressed along year
         group_by(species) |> 
         mutate(dh.cat=cut(dh_old,breaks = seq(min(dh_old),max(dh_old),by=100)),
                cormatdh=cor(mat,dh_old,use="complete")) |>

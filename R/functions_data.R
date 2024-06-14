@@ -259,7 +259,7 @@ select_species<-function(fecundity.eu_clim,
   
   mastif.species.niche<-rbind(mastif.am$df.tree, 
                               mastif.eu$df.tree) |> 
-    mutate(dh=12*pet-map) |> 
+    mutate(dh=pet-(map/12)) |> 
     mutate(fecEstSe=na_if(fecEstSe,0),
            fecEstMu=na_if(fecEstMu,0)) |> 
     filter(!is.na(fecEstMu)) |> filter(!is.na(fecEstSe)) |> 
@@ -293,7 +293,7 @@ select_species<-function(fecundity.eu_clim,
   
   nfi.species.niche<-rbind(fecundity.eu_clim,
                            fecundity.am_clim) |> 
-    mutate(dh=12*pet-map) |> 
+    # mutate(dh=12*pet-map) |> 
     filter(BA!=0) |> 
     filter(dh>(-2500)) |>
     pivot_longer(cols=c("mat","dh"),
@@ -392,8 +392,7 @@ get_nfi <- function(clim_list,
                 extract(clim,
                         y=data.frame(x=plotData$lon,
                                      y=plotData$lat))[,-1]) |> 
-    mutate(wai=(map-12*pet)/(12*pet),
-           def)
+    mutate(wai=(map-12*pet)/(12*pet))
   
   return(df.nfi)
 }
@@ -512,39 +511,42 @@ class_species <- function(fecundity.am_clim,
 
 
 get_nfipred_plot<-function(continent="europe",
-                           fit="fit2024"){
+                           fit="fit2024",
+                           sp.select){
     ## plotdata
-    plotData<-loadRData(file.path("data",continent,"inventory","plotData.rdata")) |> 
-      tibble::rownames_to_column(var="plot")
-    
+    plotData<-loadRData(file.path("data",continent,"inventory","plotData.rdata")) 
+    if(sum(grepl("plot",colnames(plotData)))==0){
+      plotData<-plotData |> tibble::rownames_to_column(var="plot")
+    }
+    rownames(plotData)=NULL
     ## pet, deficit, temperature
     pet <- apply(loadRData(file.path("data",continent,"inventory","pet.rdata")),
                  MARGIN = 1,
                  mean) |> 
       as.data.frame() |>  tibble::rownames_to_column()
     colnames(pet)=c("plot","pet")
-    temp <- apply(loadRData(file.path("data",continent,"inventory","temp.rdata")),
+    mat <- apply(loadRData(file.path("data",continent,"inventory","temp.rdata")),
                  MARGIN = 1,
                  mean) |> 
       as.data.frame() |>  tibble::rownames_to_column()
-    colnames(temp)=c("plot","temp")
-    prec <- apply(loadRData(file.path("data",continent,"inventory","prec.rdata")),
+    colnames(mat)=c("plot","mat")
+    map <- apply(loadRData(file.path("data",continent,"inventory","prec.rdata")),
                   MARGIN = 1,
                   mean) |> 
       as.data.frame() |>  tibble::rownames_to_column()
-    colnames(prec)=c("plot","prec")
-    def <- apply(loadRData(file.path("data",continent,"inventory","def.rdata")),
+    colnames(map)=c("plot","map")
+    dh <- apply(loadRData(file.path("data",continent,"inventory","def.rdata")),
                  MARGIN = 1,
                  mean) |> 
       as.data.frame()|>  tibble::rownames_to_column()
-    colnames(def)=c("plot","def")
+    colnames(dh)=c("plot","dh")
     size<-loadRData(file.path("data",continent,fit,"SIZE.rdata")) |> 
       as.data.frame() |>
       tibble::rownames_to_column(var="plot")
     colnames(size)=c("plot","size","cv_size")
     # gather
-    list_tab=list(pet,temp,prec,def,size)
-    names(list_tab)=c("pet","temp","prec","def","size")
+    list_tab=list(pet,mat,map,dh,size)
+    names(list_tab)=c("pet","mat","map","dh","size")
     for(df in names(list_tab)){
       if(sum(list_tab[[df]][["plot"]]!=plotData[["plot"]])==0){
         plotData=cbind(plotData,list_tab[[df]][df])

@@ -15,4 +15,4 @@ tar_visnetwork()
 
 Sys.setenv("TAR_PROJECT"="fit")
 tar_visnetwork()
-# tar_make()
+tar_make()

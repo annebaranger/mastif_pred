@@ -22,19 +22,19 @@ list(
     clim_list,
     get_climate()
   ),
-  tar_target(
-    df.nfi.eu,
-    get_nfi(clim_list,
-            fit="fit2024",
-            continent="europe")
-  ),
-  tar_target(
-    df.nfi.am,
-    get_nfi(clim_list,
-            fit="fit2024",
-            continent="america")
-  ),
-  
+  # tar_target(
+  #   df.nfi.eu,
+  #   get_nfi(clim_list,
+  #           fit="fit2024",
+  #           continent="europe")
+  # ),
+  # tar_target(
+  #   df.nfi.am,
+  #   get_nfi(clim_list,
+  #           fit="fit2024",
+  #           continent="america")
+  # ),
+  # 
   # # margins
   # tar_target(
   #   nfi.am_clim,
@@ -48,18 +48,18 @@ list(
   #   ),
   
   # fecundity
-  tar_target(
-    fec.eu,
-    get_fecundity(continent="europe",
-                  fit="fit2024",
-                  mastif.eu$df.species.select$species)
-  ),
-  tar_target(
-    fec.am,
-    get_fecundity(continent="america",
-                  fit="fit2024",
-                  mastif.am$df.species.select$species)
-  ),
+  # tar_target(
+  #   fec.eu,
+  #   get_fecundity(continent="europe",
+  #                 fit="fit2024",
+  #                 mastif.eu$df.species.select$species)
+  # ),
+  # tar_target(
+  #   fec.am,
+  #   get_fecundity(continent="america",
+  #                 fit="fit2024",
+  #                 mastif.am$df.species.select$species)
+  # ),
   
   # fecundity cv
   # tar_target(
@@ -75,19 +75,32 @@ list(
   # 
   
   # fecundity x plot
-  tar_target(
-    fecundity.eu_clim,
-    fec.eu |> 
-      # left_join(cv.eu,by=c("plot","species")) |> 
-      left_join(df.nfi.eu)
-  ),
+  # tar_target(
+  #   fecundity.eu_clim,
+  #   fec.eu |> 
+  #     # left_join(cv.eu,by=c("plot","species")) |> 
+  #     left_join(df.nfi.eu)
+  # ),
+  # tar_target(
+  #   fecundity.am_clim,
+  #   fec.am |> 
+  #     # left_join(cv.am,by=c("plot","species")) |> 
+  #     left_join(df.nfi.am)
+  # ),
+  # 
+  # get nfi new function
   tar_target(
     fecundity.am_clim,
-    fec.am |> 
-      # left_join(cv.am,by=c("plot","species")) |> 
-      left_join(df.nfi.am)
+    get_nfipred_plot(continent="america",
+                     fit="fit2024",
+                     sp.select=mastif.am$df.species.select$species)
   ),
-  
+  tar_target(
+    fecundity.eu_clim,
+    get_nfipred_plot(continent="europe",
+                     fit="fit2024",
+                     sp.select=mastif.eu$df.species.select$species)
+  ),
   # species selection #
   tar_target(
     species_selection,
@@ -108,7 +121,7 @@ list(
   ## create a dataframe with species selection and phylogeny
   tar_target(
     species.phylo.file,
-    "target_data/objects/species.phylo",
+    "target_data_2/objects/species.phylo",
     format="file"
   ),
   tar_target(
