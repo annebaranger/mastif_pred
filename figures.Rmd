@@ -181,6 +181,108 @@ ggsave( p,
         units = "cm")
 
 ```
+## 1bis
+posterior
+
+```{r}
+data_env<-fecundity.fit |> 
+  filter(margin.temp%in%c("cold","hot"))|> 
+  group_by(zone,species,margin.temp) |> 
+  summarise(med.dh=median(dh),
+            med.mat=median(mat)) |> 
+  group_by(margin.temp,zone) |> 
+  mutate(max.mat=max(med.mat),
+         min.mat=min(med.mat)) 
+fitcontinentdiscrete |> 
+  filter(margin.temp%in%c("cold","hot"))|> 
+  mutate(margin.temp=case_when(margin.temp=="hot"~"Hot",
+                               margin.temp=="cold"~"Cold")) |>
+  ggplot(aes(x=posterior,y=zone,fill=zone))+
+  geom_density_ridges(scale=0.6,color=NA)+
+  geom_vline(xintercept = 0)+
+  scale_fill_manual(values=c("firebrick1","slateblue","firebrick4"))+
+  facet_wrap(~margin.temp,nrow=2)+
+  common_theme+
+  theme(axis.text.y=element_blank(),
+        axis.title.y=element_blank(),
+        legend.position = c(0.1,0.2),
+        legend.background = element_rect(fill = "white",
+                                         size = 0.5),
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor.x = element_blank())+
+  labs(x="Posterior of the relative fecundity",
+       title="A. Continent model")->boxp
+  
+```
+
+
+species
+```{r}
+model_data <- fitspecies |>
+  ungroup() |> 
+  left_join(data_env,by=c("species","margin.temp")) |> 
+  filter(margin.temp%in%c("cold","hot"))|> 
+  mutate(margin.temp=case_when(margin.temp=="hot"~"Hot",
+                               margin.temp=="cold"~"Cold")) |> 
+  group_by(zone,species,margin.temp,med.mat,max.mat,min.mat) |> 
+  summarise(med.ISP=median(posterior),
+            q05=quantile(posterior, prob=0.05)[[1]],
+            q95=quantile(posterior, prob=0.95)[[1]]) |>
+  mutate(signif=!(q05<0&q95>0)) |> ungroup() |> 
+  # filter(signif) |> 
+  group_by(margin.temp,zone) |> 
+  do({
+    model = lm(med.ISP ~ med.mat, data = .)
+    data.frame(broom::tidy(model), .[1, ])
+  }) %>%
+  mutate(significant = (p.value < 0.05) & term =="med.mat" ) |> 
+  group_by(zone,margin.temp) |>
+  filter(sum(significant)>=1) |>
+  # filter(zone=="europe") |> 
+  dplyr::select(term,estimate,zone,margin.temp,max.mat,min.mat)
+model_data=model_data |> 
+  pivot_wider(names_from = term,
+              values_from = estimate) |> 
+  crossing(mat.pred=seq(-10,25,0.1)) |> 
+  filter((mat.pred>min.mat)&(mat.pred<max.mat)) |> 
+  mutate(pred.isp=`(Intercept)`+mat.pred*med.mat) 
+
+fitspecies |>
+  left_join(data_env) |> 
+  filter(margin.temp%in%c("cold","hot"))|> # &margin.deficit=="arid" 
+  mutate(margin.temp=case_when(margin.temp=="hot"~"Hot",
+                               margin.temp=="cold"~"Cold")) |> 
+  group_by(zone,species,margin.temp,med.mat) |> 
+  summarise(med.ISP=median(posterior),
+            q05=quantile(posterior, prob=0.05)[[1]],
+            q95=quantile(posterior, prob=0.95)[[1]]) |> 
+  mutate(signif=!(q05<0&q95>0)) |> 
+  ungroup() |> 
+  ggplot()+
+  geom_point(aes(med.mat,med.ISP,color=zone,shape=signif))+
+  geom_linerange(aes(x=med.mat,ymin=q05,ymax=q95,color=zone))+
+  geom_line(data = model_data,
+            aes(mat.pred,pred.isp,color=zone),
+            linewidth=1) +
+  geom_hline(yintercept = 0,color="gray32")+
+  geom_vline(xintercept = 0,color="gray32")+
+  common_theme+
+  theme(legend.position = "none")+
+  scale_color_manual(values=c("firebrick1","slateblue","firebrick4"))+
+  scale_shape_manual(values=c(1,19))+
+  scale_y_continuous(breaks = c(-4,-0.5,0.5,4))+
+  labs(title="B. Species posterior ",
+       y="Relative fecundity at the margin",
+       x="Mean annual temperature of the margin")+
+  facet_wrap(~margin.temp,nrow = 2)->plt
+
+
+cowplot::plot_grid(boxp,plt,ncol=2,rel_widths = c(2,1.2))  -> p
+
+```
+
+
+
 ### fig explo
 ```{r}
 fecundity.fit |> 
@@ -382,6 +484,8 @@ fitbiomecontinuous |>
        x="",
        y="Log ratio of fecundity \n relative to the species mean")-> a
 ```
+
+
 ## 3
 ```{r}
 fitbiomecontinuous |> 

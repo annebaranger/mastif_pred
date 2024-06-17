@@ -493,19 +493,15 @@ fit.biome.discrete<-function(data_fit,
     mutate(mid_isp=median(ISP)[[1]]) |>
     ungroup() |>
     filter(!is.na(margin.temp)) |> 
-    filter(!is.na(margin.deficit)) |>
+    # filter(!is.na(margin.deficit)) |>
     left_join(species.biome) |> 
     filter(biome!=8) |> 
     mutate(dISP=ISP/mid_isp) |> 
     filter(!is.na(dISP))
   
   # output file
-  out_anova_biome=fec_biome |> 
-    mutate(fit=NA,
-           quant05=NA,
-           quant95=NA,
-           mean=NA) |> 
-    slice(0)
+  out_ancova_biome<- setNames(data.frame(matrix(ncol = 3, nrow = 0)),
+                              c("biome", "posterior", "margin.temp"))
   
   for(b in unique(fec_biome$biome)){
     print(b)
@@ -514,7 +510,7 @@ fit.biome.discrete<-function(data_fit,
       filter(!is.na(species)) |> 
       ungroup()
     
-    X=model.matrix(~margin.temp*margin.deficit, sub_biome)
+    X=model.matrix(~margin.temp, sub_biome)
     model=paste0("anova_",b,".RData")
     if(file.exists(file.path(folder,model))){
       load(file.path(folder,model))
@@ -538,32 +534,63 @@ fit.biome.discrete<-function(data_fit,
     posteriors_fec<-as.data.frame(fit) |>
       dplyr::select(!matches("beta_")) |>
       dplyr::select(matches("beta"))
+    # posteriors_fec<-posteriors_fec[,1:3]
     colnames(posteriors_fec)[1:ncol(X)]=colnames(X)
     
-    
-    speciescode=sub_biome |> ungroup()|> dplyr::select(species) |> mutate(code=as.numeric(as.factor(species))) |> unique()
-    speciesranef=as.data.frame(summary(fit)$summary) |> 
-      rownames_to_column(var="parameter") |> 
-      filter(grepl("alpha",parameter)) |> 
-      dplyr::select(parameter,mean) |> 
-      mutate(code=as.numeric(gsub(".*?\\[([^]]*)\\].*", "\\1", parameter))) |> 
-      left_join(speciescode) |> 
-      dplyr::select(species,mean)
-    
-    contrast_mat= X |>  t()
+    contrast_mat= X |>  unique() |>  t()
     contrast_post=as.matrix(posteriors_fec)[,1:ncol(X)] %*% contrast_mat
-    fit=apply(contrast_post,2,median)
-    quant05=apply(contrast_post,2,quantile,probs=0.05)
-    quant95=apply(contrast_post,2,quantile,probs=0.95)
     
-    output=cbind(sub_biome,
-                 fit=fit,
-                 quant05=quant05,
-                 quant95=quant95) |>
-      left_join(speciesranef,by="species") 
+    contrast_cor=as.data.frame(X) |> 
+      unique() |>
+      mutate(margin.temp=case_when(margin.tempcold==1~"cold",
+                                   margin.temphot==1~"hot",
+                                   TRUE~"mid")) |> 
+      mutate(margin.temp=factor(margin.temp,levels=c("cold","mid","hot"))) |> 
+      tibble::rownames_to_column(var = "code") |> 
+      dplyr::select(code,margin.temp) 
     
-    out_anova_biome=rbind(out_anova_biome,
-                          output)
+    post_distrib=as.data.frame(contrast_post) |> 
+      pivot_longer(cols=everything(),
+                   names_to = "code",
+                   values_to = "posterior") |>
+      left_join(contrast_cor,by="code") |> 
+      select(-code) |> 
+      mutate(species=sp)
+    
+    out_ancova_biome=rbind(out_ancova_biome,
+                           post_distrib)
+    
+    # 
+    # 
+    # posteriors_fec<-as.data.frame(fit) |>
+    #   dplyr::select(!matches("beta_")) |>
+    #   dplyr::select(matches("beta"))
+    # colnames(posteriors_fec)[1:ncol(X)]=colnames(X)
+    # 
+    # 
+    # speciescode=sub_biome |> ungroup()|> dplyr::select(species) |> mutate(code=as.numeric(as.factor(species))) |> unique()
+    # speciesranef=as.data.frame(summary(fit)$summary) |> 
+    #   rownames_to_column(var="parameter") |> 
+    #   filter(grepl("alpha",parameter)) |> 
+    #   dplyr::select(parameter,mean) |> 
+    #   mutate(code=as.numeric(gsub(".*?\\[([^]]*)\\].*", "\\1", parameter))) |> 
+    #   left_join(speciescode) |> 
+    #   dplyr::select(species,mean)
+    # 
+    # contrast_mat= X |>  t()
+    # contrast_post=as.matrix(posteriors_fec)[,1:ncol(X)] %*% contrast_mat
+    # fit=apply(contrast_post,2,median)
+    # quant05=apply(contrast_post,2,quantile,probs=0.05)
+    # quant95=apply(contrast_post,2,quantile,probs=0.95)
+    # 
+    # output=cbind(sub_biome,
+    #              fit=fit,
+    #              quant05=quant05,
+    #              quant95=quant95) |>
+    #   left_join(speciesranef,by="species") 
+    # 
+    # out_anova_biome=rbind(out_anova_biome,
+    #                       output)
   }
   
   return(out_anova_biome)
@@ -595,17 +622,14 @@ fit.species <- function(data_fit,
     filter(!is.na(dISP)) |> 
     filter(!is.na(dh))
   
-  out_ancova_species=fec_species |> 
-    mutate(fit=NA,
-           quant05=NA,
-           quant95=NA) |> 
-    slice(0)
+  out_ancova_species<- setNames(data.frame(matrix(ncol = 3, nrow = 0)),
+                                c("species", "posterior", "margin.temp"))
   # sp=unique(out_ancova_species$species)[1]
   for (sp in unique(fec_species$species)){
     print(sp)
     sp.mod<-fec_species[fec_species$species==sp,]
     model=paste0("ancova_",sp,"_lin.RData")
-    X=model.matrix(~margin.temp*dh, sp.mod) 
+    X=model.matrix(~margin.temp, sp.mod) 
     if(file.exists(file.path(folder,model))){
       load(file.path(folder,model))
     }else{
@@ -626,21 +650,31 @@ fit.species <- function(data_fit,
     posteriors_fec<-as.data.frame(fit) |>
       dplyr::select(!matches("beta_")) |>
       dplyr::select(matches("beta"))
+    # posteriors_fec<-posteriors_fec[,1:3]
     colnames(posteriors_fec)[1:ncol(X)]=colnames(X)
     
-    contrast_mat= X |>  t()
+    contrast_mat= X |>  unique() |>  t()
     contrast_post=as.matrix(posteriors_fec)[,1:ncol(X)] %*% contrast_mat
-    fit=apply(contrast_post,2,median)
-    quant05=apply(contrast_post,2,quantile,probs=0.05)
-    quant95=apply(contrast_post,2,quantile,probs=0.95)
     
-    output=cbind(sp.mod,
-                 fit=fit,
-                 quant05=quant05,
-                 quant95=quant95) 
+    contrast_cor=as.data.frame(X) |> 
+      unique() |>
+      mutate(margin.temp=case_when(margin.tempcold==1~"cold",
+                                   margin.temphot==1~"hot",
+                                   TRUE~"mid")) |> 
+      mutate(margin.temp=factor(margin.temp,levels=c("cold","mid","hot"))) |> 
+      tibble::rownames_to_column(var = "code") |> 
+      dplyr::select(code,margin.temp) 
+    
+    post_distrib=as.data.frame(contrast_post) |> 
+      pivot_longer(cols=everything(),
+                   names_to = "code",
+                   values_to = "posterior") |>
+      left_join(contrast_cor,by="code") |> 
+      select(-code) |> 
+      mutate(species=sp)
     
     out_ancova_species=rbind(out_ancova_species,
-                             output)
+                             post_distrib)
   }
   return(out_ancova_species)
 }

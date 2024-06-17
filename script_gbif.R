@@ -10,8 +10,8 @@ options(tidyverse.quiet = TRUE)
 sf::sf_use_s2(FALSE)
 tar_option_set(packages = packages.in)
 
-species.eu=tar_read(species.eu,store = "target_data")
-species.am=tar_read(species.am,store = "target_data")
+species.eu=tar_read(species.eu,store = "target_data_2")
+species.am=tar_read(species.am,store = "target_data_2")
 
 list(
   
@@ -40,7 +40,10 @@ list(
   #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
   
   # Download CHELSA climatic data
-  tar_target(chelsa_files, download_CHELSA(bioclim = c(1, 6, 12), path = "data/CHELSA"), format = "file"),
+  # tar_target(chelsa_files, download_CHELSA(bioclim = c(1, 6, 12), path = "data/CHELSA"), format = "file"),
+  tar_target(chelsa_files, c("data/CHELSA/CHELSA_bio1_1981-2010_V.2.1.tif","data/CHELSA/CHELSA_bio12_1981-2010_V.2.1.tif","data/CHELSA/CHELSA_pet_penman_mean_1981-2010_V.2.1.tif")),
+  
+  
 
   # Compute optimal climatic conditions for each species
   tar_target(meanClimate_species, extract_climate_for_gbif(chelsa_files, data_gbif_filtered)), 

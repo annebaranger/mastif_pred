@@ -167,16 +167,23 @@ get_data_gbif <- function(gbif_taxon_keys, user, pwd, email){
   if(!dir.exists("output")) dir.create("output")
   
   # Once download is complete, get the data
-  out <- occ_download_get(request_download[[1]], path = "output", overwrite = TRUE) %>% 
+  out <- occ_download_get(request_download[[1]], path = "output", overwrite = TRUE) %>%
     occ_download_import %>%
-    setNames(tolower(names(.))) %>% # set lowercase column names to work with CoordinateCleaner
+    rename_with(.cols=everything(),tolower) |> 
     filter(coordinateprecision < 0.01 | is.na(coordinateprecision)) %>% 
     filter(!coordinateuncertaintyinmeters %in% c(999, 9999)) %>% 
-    filter(!decimallatitude == 0 | !decimallongitude == 0) %>%
-    cc_cen(buffer = 2000) %>% # remove country centroids within 2km 
-    cc_cap(buffer = 2000) %>% # remove capitals centroids within 2km
-    cc_inst(buffer = 2000) %>% # remove zoo and herbaria within 2km 
-    cc_sea() %>% # remove from ocean 
+    filter(!decimallatitude == 0 | !decimallongitude == 0) |> 
+    cc_cen(lon = "decimallongitude",
+           lat = "decimallatitude",
+           buffer = 2000) %>% # remove country centroids within 2km 
+    cc_cap(lon = "decimallongitude",
+           lat = "decimallatitude",
+           buffer = 2000) %>% # remove capitals centroids within 2km
+    cc_inst(lon = "decimallongitude",
+            lat = "decimallatitude",
+            buffer = 2000) %>% # remove zoo and herbaria within 2km 
+    cc_sea(lon = "decimallongitude",
+           lat = "decimallatitude") %>% # remove from ocean 
     distinct(decimallongitude,decimallatitude,specieskey,datasetkey, .keep_all = TRUE) %>%
     glimpse()
   
@@ -323,45 +330,53 @@ extract_climate_for_gbif <- function(chelsa_files, data_gbif){
   out <- data_gbif
   
   # Extract mean annual temperature
-  chelsa_file_mat <- grep("bio10_1.tif", chelsa_files, value = TRUE)
+  chelsa_file_mat <- grep("bio1_", chelsa_files, value = TRUE)
   raster_mat <- terra::rast(chelsa_file_mat)
   out$mat <- as.numeric(terra::extract(raster_mat,
                                        cbind(out$decimallongitude,
                                              out$decimallatitude))[, 1])/10
   
   # Extract mean annual precipitation
-  chelsa_file_map <- grep("bio10_12.tif", chelsa_files, value = TRUE)
+  chelsa_file_map <- grep("bio12", chelsa_files, value = TRUE)
   raster_map <- terra::rast(chelsa_file_map)
   out$map <- as.numeric(terra::extract(raster_map,
                                        cbind(out$decimallongitude,
                                              out$decimallatitude))[, 1])
   
   # Extract min temperature
-  chelsa_file_tmin <- grep("bio10_6.tif", chelsa_files, value = TRUE)
-  raster_tmin <- terra::rast(chelsa_file_tmin)
-  out$tmin <- as.numeric(terra::extract(raster_tmin,
+  chelsa_file_pet <- grep("pet", chelsa_files, value = TRUE)
+  raster_pet <- terra::rast(chelsa_file_pet)
+  out$pet <- as.numeric(terra::extract(raster_pet,
                                         cbind(out$decimallongitude,
-                                             out$decimallatitude))[, 1])/10
-  
+                                             out$decimallatitude))[, 1])
+  out$map <- as.numeric(terra::extract(raster_map,
+                                       cbind(out$decimallongitude,
+                                             out$decimallatitude))[, 1])
+  out$dh <- out$pet - out$map/12
   
   # - Finish formatting
   out <- out %>%
     group_by(species) %>%
-    summarize(mat.low = quantile(mat, probs = 0.025, na.rm = TRUE),
-              mat.high = quantile(mat, probs = 0.975, na.rm = TRUE), 
+    summarize(mat.qlow = quantile(mat, probs = 0.025, na.rm = TRUE),
+              mat.qhigh = quantile(mat, probs = 0.975, na.rm = TRUE), 
+              mat.qrange=mat.high-mat.low,
               mat.rlow=quantile(mat,probs = min(5, n())/n(),na.rm = TRUE),
               mat.rhigh=quantile(mat,probs = 1- min(5, n())/n(),na.rm = TRUE),
+              mat.rrange=mat.rhigh-mat.rlow,
               mat = mean(mat, na.rm = TRUE), 
-              map.low = quantile(map, probs = 0.025, na.rm = TRUE), 
-              map.high = quantile(map, probs = 0.975, na.rm = TRUE),
-              map.rlow=quantile(map,probs = min(5, n())/n(),na.rm = TRUE),
-              map.rhigh=quantile(map,probs = 1- min(5, n())/n(),na.rm = TRUE),
-              map = mean(map, na.rm = TRUE), 
-              tmin.low = quantile(tmin, probs = 0.025, na.rm = TRUE), 
-              tmin.high = quantile(tmin, probs = 0.975, na.rm = TRUE), 
-              tmin.rlow=quantile(tmin,probs = min(5, n())/n(),na.rm = TRUE),
-              tmin.rhigh=quantile(tmin,probs = 1- min(5, n())/n(),na.rm = TRUE),
-              tmin = mean(tmin, na.rm = TRUE))
+              dh.qlow = quantile(dh, probs = 0.025, na.rm = TRUE), 
+              dh.qhigh = quantile(dh, probs = 0.975, na.rm = TRUE),
+              dh.qrange=dh.high-dh.low,
+              dh.rlow=quantile(dh,probs = min(5, n())/n(),na.rm = TRUE),
+              dh.rhigh=quantile(dh,probs = 1- min(5, n())/n(),na.rm = TRUE),
+              dh.rrange=dh.rhigh-dh.rlow,
+              dh = mean(dh, na.rm = TRUE)#, 
+              # tmin.low = quantile(tmin, probs = 0.025, na.rm = TRUE), 
+              # tmin.high = quantile(tmin, probs = 0.975, na.rm = TRUE), 
+              # tmin.rlow=quantile(tmin,probs = min(5, n())/n(),na.rm = TRUE),
+              # tmin.rhigh=quantile(tmin,probs = 1- min(5, n())/n(),na.rm = TRUE),
+              # tmin = mean(tmin, na.rm = TRUE)
+              )
   
   return(out)
   
