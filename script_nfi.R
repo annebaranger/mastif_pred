@@ -103,11 +103,22 @@ list(
   ),
   # species selection #
   tar_target(
-    species_selection,
-    select_species(fecundity.eu_clim,
-                   fecundity.am_clim,
-                   mastif.am,
-                   mastif.eu)),
+    species_selection_nfi,
+    select_species_nfi(fecundity.eu_clim,
+                       fecundity.am_clim,
+                       mastif.am,
+                       mastif.eu)),
+  tar_target(gbif_niche_file,
+             "output/sp_gbif_climate.csv",
+             format = "file"),
+  tar_target(gbif_niche,
+             read.table(gbif_niche_file,header = TRUE)),
+  tar_target(
+    species_selection_gbif,
+    select_species_gbif(gbif_niche,
+                        mastif.am,
+                        mastif.eu)),
+  
   # tar_target(
   #   sp.select.am,
   #   species_selection$df.select[species_selection$df.select$block=="america"&
@@ -132,6 +143,10 @@ list(
     species_class, #classification of nfi species
     class_species(fecundity.am_clim,
                   fecundity.eu_clim)
+  ),
+  tar_target(
+    species_selection,
+    species_selection_gbif
   ),
   tar_target(
     phylo.select,

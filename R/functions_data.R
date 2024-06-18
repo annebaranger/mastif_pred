@@ -315,6 +315,95 @@ select_species_gbif<-function(gbif_niche,
               select.quant=select.quant))
 }
 
+check_selection <- function(phylo.select,
+                            data_gbif,
+                            fecundity.am_clim,
+                            fecundity.eu_clim,
+                            mastif.am,
+                            mastif.eu){
+  mastif_data<-rbind(mastif.am$df.tree, 
+                     mastif.eu$df.tree) |> 
+    mutate(dh=pet-(map/12)) |> 
+    mutate(fecEstSe=na_if(fecEstSe,0),
+           fecEstMu=na_if(fecEstMu,0)) |> 
+    filter(!is.na(fecEstMu)) |> filter(!is.na(fecEstSe)) |> 
+    # compute numbers of observations per plot
+    group_by(plotID,lon,lat,species,mat,dh) |> 
+    summarise(n_plot=n(),
+              fecEstMu_plot=mean(fecEstMu,na.rm=TRUE),
+              se_plot=sqrt(sum(fecEstSe^2)/n_plot),
+              cv_plot=se_plot/fecEstMu_plot) |> 
+    # Compute mean of se per plot
+    ungroup() 
+  
+  nfi_data<-rbind(fecundity.eu_clim,
+                  fecundity.am_clim) |> 
+    # mutate(dh=12*pet-map) |> 
+    filter(BA!=0) |> 
+    filter(dh>(-2500)) |>
+    group_by(plot,lon,lat,species,mat,dh) |> 
+    summarise(n=n())
+  sf::sf_use_s2(FALSE)
+  usmap <- sf::st_as_sf(getMap(resolution = "high")) |> 
+    sf::st_crop(xmin=-135,xmax=-55,ymin=18,ymax=65)
+  eumap <- sf::st_as_sf(getMap(resolution = "high")) |> 
+    sf::st_crop(xmin=-10,xmax=35,ymin=35,ymax=70)
+  
+  littlemap<-read.csv("data/USTreeAtlas-main/Little_datatable.csv")
+  
+  for (sp in phylo.select$species){
+    tryCatch(
+      {
+        print(sp)
+        sp_l<-phylo.select[phylo.select$species==sp,"species_l"]
+        s_p<-str_replace(sp_l," ","_")
+        splittle<-littlemap |> filter(Latin.Name==sp_l) |> pull(SHP..)
+        if(phylo.select[phylo.select$species==sp,"block"]=="america"){
+          continent.map=usmap
+          species_map=sf::read_sf(dsn=paste0("data/USTreeAtlas-main/shp/",splittle,"/"),
+                                  layer=splittle) |> 
+            sf::st_set_crs(sf::st_crs(eumap))
+        }
+        if(phylo.select[phylo.select$species==sp,"block"]=="europe"){
+          continent.map=eumap
+          if(file.exists(paste0("data/chorological_maps_dataset/",sp_l,"/shapefiles/",s_p,"_syn_plg.dbf"))){
+            file.sp=paste0(s_p,"_syn_plg")
+          }else{
+            file.sp=paste0(s_p,"_plg")
+          }
+          species_map=sf::read_sf(dsn=paste0("data/chorological_maps_dataset/",sp_l,"/shapefiles/"),
+                                  layer=) |> 
+            sf::st_set_crs(sf::st_crs(eumap))
+        }
+        contbox=sf::st_bbox(continent.map)
+        mastif.sp<-mastif_data[mastif_data$species==sp,]
+        gbif.sp<-data_gbif[data_gbif$species==sp_l,] |> 
+          filter(decimallongitude<contbox[["xmax"]],
+                 decimallongitude>contbox[["xmin"]],
+                 decimallatitude<contbox[["ymax"]],
+                 decimallatitude>contbox[["ymin"]])
+        nfi.sp<-nfi_data[nfi_data$species==sp,]
+        ggplot()+
+          geom_sf(data=continent.map,fill="tan",alpha=0.4,color=NA)+
+          geom_point(data=gbif.sp,aes(x=decimallongitude,y=decimallatitude),alpha=0.2,color="darkgrey",size=0.2)+
+          geom_point(data=mastif.sp,aes(x=lon,y=lat),color="red",size=0.4)+
+          geom_sf(data=species_map,fill=NA,color="blue")+
+          theme(axis.title = element_blank(),
+                axis.text = element_blank())->plot.gbif
+        ggplot()+
+          geom_sf(data=continent.map,fill="tan",alpha=0.4,color=NA)+
+          geom_point(data=nfi.sp,aes(x=lon,y=lat),alpha=0.2,color="darkgrey",size=0.2)+
+          geom_point(data=mastif.sp,aes(x=lon,y=lat),color="red",size=0.4)+
+          geom_sf(data=species_map,fill=NA,color="blue")+
+          theme(axis.title = element_blank(),
+                axis.text = element_blank())->plot.nfi
+        plot2<-cowplot::plot_grid(plot.gbif,plot.nfi, ncol = 2, labels = c("GBIF x MASTIF", "NFI x MASTIF"))
+        ggsave(filename = paste0("species_map/",sp,".png"), plot = plot2)
+      },
+      error=function(e)simpleError("No maps")
+    )
+  }
+}
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 #### Section 3 - NFI data fecundity ####
 #' @authors Anne Baranger (INRAE - LESSEM)

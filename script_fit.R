@@ -9,7 +9,7 @@ library(targets)
 source("R/functions_fit.R")
 options(tidyverse.quiet = TRUE, clustermq.scheduler = "multiprocess")
 tar_option_set(packages = c("stringr","ggplot2","tidyr","dplyr","terra",
-                            "factoextra","modi","tibble","mastif","rstan",
+                            "factoextra","modi","tibble","rstan",
                             "future"),
                error = "continue",
                memory = "transient") 

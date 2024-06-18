@@ -522,7 +522,7 @@ fit.biome.discrete<-function(data_fit,
                       ISP=sub_biome$dISP,
                       X=X,
                       NULL)
-      fit <- stan(file = "stan/lmm_ancova.stan",
+      fit <- stan(file = "stan/lmm_dif.stan",
                   data=data_biome,
                   iter=1000,
                   chains=3,
@@ -555,7 +555,7 @@ fit.biome.discrete<-function(data_fit,
                    values_to = "posterior") |>
       left_join(contrast_cor,by="code") |> 
       select(-code) |> 
-      mutate(species=sp)
+      mutate(biome=b)
     
     out_ancova_biome=rbind(out_ancova_biome,
                            post_distrib)

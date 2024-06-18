@@ -334,7 +334,7 @@ extract_climate_for_gbif <- function(chelsa_files, data_gbif){
   raster_mat <- terra::rast(chelsa_file_mat)
   out$mat <- as.numeric(terra::extract(raster_mat,
                                        cbind(out$decimallongitude,
-                                             out$decimallatitude))[, 1])/10
+                                             out$decimallatitude))[, 1])
   
   # Extract mean annual precipitation
   chelsa_file_map <- grep("bio12", chelsa_files, value = TRUE)
@@ -359,14 +359,14 @@ extract_climate_for_gbif <- function(chelsa_files, data_gbif){
     group_by(species) %>%
     summarize(mat.qlow = quantile(mat, probs = 0.025, na.rm = TRUE),
               mat.qhigh = quantile(mat, probs = 0.975, na.rm = TRUE), 
-              mat.qrange=mat.high-mat.low,
+              mat.qrange=mat.qhigh-mat.qlow,
               mat.rlow=quantile(mat,probs = min(5, n())/n(),na.rm = TRUE),
               mat.rhigh=quantile(mat,probs = 1- min(5, n())/n(),na.rm = TRUE),
               mat.rrange=mat.rhigh-mat.rlow,
               mat = mean(mat, na.rm = TRUE), 
               dh.qlow = quantile(dh, probs = 0.025, na.rm = TRUE), 
               dh.qhigh = quantile(dh, probs = 0.975, na.rm = TRUE),
-              dh.qrange=dh.high-dh.low,
+              dh.qrange=dh.qhigh-dh.qlow,
               dh.rlow=quantile(dh,probs = min(5, n())/n(),na.rm = TRUE),
               dh.rhigh=quantile(dh,probs = 1- min(5, n())/n(),na.rm = TRUE),
               dh.rrange=dh.rhigh-dh.rlow,
