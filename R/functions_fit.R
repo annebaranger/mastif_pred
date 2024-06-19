@@ -534,7 +534,7 @@ fit.biome.discrete<-function(data_fit,
     posteriors_fec<-as.data.frame(fit) |>
       dplyr::select(!matches("beta_")) |>
       dplyr::select(matches("beta"))
-    # posteriors_fec<-posteriors_fec[,1:3]
+    posteriors_fec<-posteriors_fec[,1:3]
     colnames(posteriors_fec)[1:ncol(X)]=colnames(X)
     
     contrast_mat= X |>  unique() |>  t()
