@@ -217,9 +217,7 @@ fit.continent.discrete.excl<-function(data_fit,
                 core=3)
     save(fit,file=file.path(folder,"anova_allsp_margintemp_zone_spselect.RData"))
   }
-  fit=fit.lm
-  
-  
+
   # launch_shinystan(fit.lm)
   posteriors_fec<-as.data.frame(fit) |> 
     dplyr::select(!matches("beta_")) |> 
@@ -500,7 +498,7 @@ fit.biome.discrete<-function(data_fit,
     filter(!is.na(dISP))
   
   # output file
-  out_ancova_biome<- setNames(data.frame(matrix(ncol = 3, nrow = 0)),
+  out_anova_biome<- setNames(data.frame(matrix(ncol = 3, nrow = 0)),
                               c("biome", "posterior", "margin.temp"))
   
   for(b in unique(fec_biome$biome)){
@@ -557,7 +555,7 @@ fit.biome.discrete<-function(data_fit,
       select(-code) |> 
       mutate(biome=b)
     
-    out_ancova_biome=rbind(out_ancova_biome,
+    out_anova_biome=rbind(out_anova_biome,
                            post_distrib)
     
     # 
