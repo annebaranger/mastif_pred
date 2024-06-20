@@ -397,8 +397,35 @@ check_selection <- function(phylo.select,
           geom_sf(data=species_map,fill=NA,color="blue")+
           theme(axis.title = element_blank(),
                 axis.text = element_blank())->plot.nfi
+        
+        gbif.sp |> select(species,mat,dh)  |> 
+          pivot_longer(cols=c("mat","dh"),names_to="clim",values_to = "quantile") |>
+          group_by(clim) |> summarise(q05_gbif=quantile(quantile,probs=0.05,na.rm=TRUE),
+                                      q95_gbif=quantile(quantile,probs=0.95,na.rm=TRUE)) -> quant.gbif
+        nfi.sp |> select(species,mat,dh)  |> 
+          pivot_longer(cols=c("mat","dh"),names_to="clim",values_to = "quantile") |>
+          group_by(clim) |> summarise(q05_nfi=quantile(quantile,probs=0.05,na.rm=TRUE),
+                                      q95_nfi=quantile(quantile,probs=0.95,na.rm=TRUE)) -> quant.nfi
+        mastif.sp |> select(species,mat,dh) |> 
+          pivot_longer(cols=c("mat","dh"),names_to="clim",values_to = "clim_val") |> 
+          left_join(quant.gbif) |>
+          left_join(quant.nfi) |> 
+          ggplot(aes(clim_val))+
+          geom_histogram(alpha=0.5)+
+          geom_vline(aes(xintercept=q05_gbif,color="gbif"))+
+          geom_vline(aes(xintercept=q95_gbif,color="gbif"))+
+          geom_vline(aes(xintercept=q05_nfi,color="nfi"))+
+          geom_vline(aes(xintercept=q95_nfi,color="nfi"))+
+          facet_wrap(~clim,scales = "free")+
+          theme(axis.title = element_blank(),
+                axis.text.y = element_blank(),
+                legend.position = "bottom")+
+          labs(color="Quantiles from:")-> plot.var
+        
+        
         plot2<-cowplot::plot_grid(plot.gbif,plot.nfi, ncol = 2, labels = c("GBIF x MASTIF", "NFI x MASTIF"))
-        ggsave(filename = paste0("species_map/",sp,".png"), plot = plot2)
+        plot3 <-cowplot::plot_grid(plot2,plot.var, nrow = 2,rel_heights =  c(1,0.5))
+        ggsave(filename = paste0("species_map/",sp,".png"),width=8,height = 8.5, plot = plot3)
       },
       error=function(e)simpleError("No maps")
     )
