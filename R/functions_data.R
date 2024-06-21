@@ -421,7 +421,10 @@ check_selection <- function(phylo.select,
                 axis.text.y = element_blank(),
                 legend.position = "bottom")+
           labs(color="Quantiles from:")-> plot.var
-        
+        ggplot()+
+          geom_hex(data=gbif.sp,aes(x=mat,y=dh))+
+          scale_fill_continuous(type = "viridis") +
+          geom_point(data=mastif.sp,aes(x=mat,y=dh),color="red")
         
         plot2<-cowplot::plot_grid(plot.gbif,plot.nfi, ncol = 2, labels = c("GBIF x MASTIF", "NFI x MASTIF"))
         plot3 <-cowplot::plot_grid(plot2,plot.var, nrow = 2,rel_heights =  c(1,0.5))
