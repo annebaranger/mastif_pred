@@ -372,7 +372,7 @@ check_selection <- function(phylo.select,
             file.sp=paste0(s_p,"_plg")
           }
           species_map=sf::read_sf(dsn=paste0("data/chorological_maps_dataset/",sp_l,"/shapefiles/"),
-                                  layer=) |> 
+                                  layer=file.sp) |> 
             sf::st_set_crs(sf::st_crs(eumap))
         }
         contbox=sf::st_bbox(continent.map)
@@ -603,7 +603,12 @@ class_species <- function(fecundity.am_clim,
 
 get_nfipred_plot<-function(continent="europe",
                            fit="fit2024",
+                           chelsa_files=list(mat="data/CHELSA/CHELSA_bio1_1981-2010_V.2.1.tif",
+                                          map="data/CHELSA/CHELSA_bio12_1981-2010_V.2.1.tif",
+                                          pet="data/CHELSA/CHELSA_pet_penman_mean_1981-2010_V.2.1.tif"),
                            sp.select){
+  
+  if(fit=="fit2024"){
     ## plotdata
     plotData<-loadRData(file.path("data",continent,"inventory","plotData.rdata")) 
     if(sum(grepl("plot",colnames(plotData)))==0){
@@ -641,11 +646,33 @@ get_nfipred_plot<-function(continent="europe",
     for(df in names(list_tab)){
       if(sum(list_tab[[df]][["plot"]]!=plotData[["plot"]])==0){
         plotData=cbind(plotData,list_tab[[df]][df])
-      }else(
+      }else{
         plotData<-plotData |> left_join(list_tab[[df]],by="plot")
-      )
+      }
     }
-    
+  }
+  
+  if(fit=="fit2023"){
+    plotData<-loadRData(file.path("data",continent,fit,"plotData.rdata")) 
+    plotData$pet <- as.numeric(terra::extract(rast(chelsa_files$pet),
+                                       cbind(plotData$lon,
+                                             plotData$lat))[, 1])
+    plotData$map <- as.numeric(terra::extract(rast(chelsa_files$map),
+                                       cbind(plotData$lon,
+                                             plotData$lat))[, 1])
+    plotData$mat <- as.numeric(terra::extract(rast(chelsa_files$mat),
+                                       cbind(plotData$lon,
+                                             plotData$lat))[, 1])
+    plotData$dh <- plotData$pet - plotData$map/12
+    size<-loadRData(file.path("data",continent,fit,"SIZE.rdata")) |> 
+      as.data.frame() |>
+      tibble::rownames_to_column(var="plot")
+    if(sum(plotData[["plot"]]!=size[["plot"]])==0){
+      plotData=cbind(plotData,size[,c("SIZE","CV")])
+    }else{
+      plotData<-plotData |> left_join(size,by="plot")
+    }
+  }
     # structure data
     BA=loadRData(file.path("data",continent,fit,"BA.rdata")) |> 
       as.data.frame() |>

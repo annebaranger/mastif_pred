@@ -41,7 +41,9 @@ list(
   
   # Download CHELSA climatic data
   # tar_target(chelsa_files, download_CHELSA(bioclim = c(1, 6, 12), path = "data/CHELSA"), format = "file"),
-  tar_target(chelsa_files, c("data/CHELSA/CHELSA_bio1_1981-2010_V.2.1.tif","data/CHELSA/CHELSA_bio12_1981-2010_V.2.1.tif","data/CHELSA/CHELSA_pet_penman_mean_1981-2010_V.2.1.tif")),
+  tar_target(chelsa_files, c("data/CHELSA/CHELSA_bio1_1981-2010_V.2.1.tif",
+                             "data/CHELSA/CHELSA_bio12_1981-2010_V.2.1.tif",
+                             "data/CHELSA/CHELSA_pet_penman_mean_1981-2010_V.2.1.tif")),
   
   
 

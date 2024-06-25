@@ -92,13 +92,19 @@ list(
   tar_target(
     fecundity.am_clim,
     get_nfipred_plot(continent="america",
-                     fit="fit2024",
+                     fit="fit2023",
+                     chelsa_files=list(mat="data/CHELSA/CHELSA_bio1_1981-2010_V.2.1.tif",
+                                       map="data/CHELSA/CHELSA_bio12_1981-2010_V.2.1.tif",
+                                       pet="data/CHELSA/CHELSA_pet_penman_mean_1981-2010_V.2.1.tif"),
                      sp.select=mastif.am$df.species.select$species)
   ),
   tar_target(
     fecundity.eu_clim,
     get_nfipred_plot(continent="europe",
-                     fit="fit2024",
+                     fit="fit2023",
+                     chelsa_files=list(mat="data/CHELSA/CHELSA_bio1_1981-2010_V.2.1.tif",
+                                       map="data/CHELSA/CHELSA_bio12_1981-2010_V.2.1.tif",
+                                       pet="data/CHELSA/CHELSA_pet_penman_mean_1981-2010_V.2.1.tif"),
                      sp.select=mastif.eu$df.species.select$species)
   ),
   # species selection #

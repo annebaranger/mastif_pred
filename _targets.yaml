@@ -1,12 +1,12 @@
 data:
   script: script_data.R
-  store: target_data_2 #target_data is for old fits
+  store: target_data
 data_gbif:
   script: script_gbif.R
   store: target_gbif
 data_nfi:
   script: script_nfi.R
-  store: target_nfi_2
+  store: target_nfi
 fit:
   script: script_fit.R
   store: target_fit
