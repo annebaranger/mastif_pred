@@ -223,7 +223,8 @@ select_species_nfi<-function(fecundity.eu_clim,
     filter(ind_neg==4) |> 
     select(species) |> unique() |> pull() -> select.quant
   
-  return(list(select.rank=select.rank,
+  return(list(df.quant=nfi.species.niche,
+              select.rank=select.rank,
               select.quant=select.quant))
 }
 
@@ -311,9 +312,95 @@ select_species_gbif<-function(gbif_niche,
     filter(ind_neg==4) |> 
     select(species) |> unique() |> pull() -> select.quant
   
-  return(list(select.rank=select.rank,
+  return(list(df.quant=gbif_niche,
+              select.rank=select.rank,
               select.quant=select.quant))
 }
+
+
+
+#' Assess margin reliability based on expert maps
+#' @description Compare climatic distribution of GBIF plots and MASTIF plots. 
+#' Select species for which only MASTIF coverage is large enough compared to GBIF
+#' @param map_file
+#' @param pet_file
+#' @param mat_file
+#' @param species_selection_gbif
+#' @param species_selection_nfi description
+#' @param phylo.select 
+select_species_expert<-function(map_file="data/CHELSA/CHELSA_bio12_1981-2010_V.2.1.tif",
+                                pet_file="data/CHELSA/CHELSA_pet_penman_mean_1981-2010_V.2.1.tif",
+                                mat_file="data/CHELSA/CHELSA_bio1_1981-2010_V.2.1.tif",
+                                species_selection_gbif,
+                                species_selection_nfi,
+                                phylo.select
+                              ){
+  map_raster=terra::rast(map_file)
+  pet_raster=terra::rast(pet_file)
+  mat_raster=terra::rast(mat_file)
+  dh_raster=pet_raster-map_raster/12
+  list_rast_min <- lapply(list(mat=mat_raster,
+                               dh=dh_raster), 
+                          function(r) {
+                            aggregate(r, fact = 10,fun="min")
+                            })
+  list_rast_max <- lapply(list(mat=mat_raster,
+                               dh=dh_raster), 
+                          function(r) {
+                            aggregate(r, fact = 10,fun="max")
+                          })
+  sf::sf_use_s2(FALSE)
+  usmap <- sf::st_as_sf(getMap(resolution = "high")) |> 
+    sf::st_crop(xmin=-170,xmax=-55,ymin=025,ymax=90)
+  eumap <- sf::st_as_sf(getMap(resolution = "high")) |> 
+    sf::st_crop(xmin=-10,xmax=35,ymin=35,ymax=70)
+  
+  df_extrema<-data.frame(species=phylo.select$species) |> 
+    crossing(clim=c("mat","dh")) |> group_by(species,clim) |> 
+    crossing(limit=c("qhigh","qlow")) |> 
+    left_join(species_selection_gbif$df.quant) |> 
+    left_join(species_selection_nfi$df.quant) |> 
+    select(species,clim,limit,value_gbif,range_gbif,value_nfi,range.nfi) |> 
+    mutate(value_exp=NA,range_exp=NA)
+  
+  for(sp in unique(phylo.select$species)){
+    print(sp)
+    if(phylo.select[phylo.select$species==sp,"block"]=="america"){
+      continent.map=usmap$geometry
+    }
+    if(phylo.select[phylo.select$species==sp,"block"]=="europe"){
+      continent.map=eumap$geometry
+    }
+    
+    sp_map=sf::read_sf(dsn=phylo.select[phylo.select$species==sp,"dir.sp"],
+                       layer=phylo.select[phylo.select$species==sp,"file.sp"]) |>
+      sf::st_set_crs(sf::st_crs(continent.map)) |> 
+      sf::st_intersection(continent.map)
+    
+    for(i in 1:2){
+      terra::mask(list_rast_min[[i]],vect(sp_map))->mask_min
+      terra::mask(list_rast_max[[i]],vect(sp_map))->mask_max
+      q05=global(mask_min, quantile, probs=c(0.05), na.rm=TRUE)[["X5."]]
+      q95=global(mask_min, quantile, probs=c(0.95), na.rm=TRUE)[["X95."]]
+      df_extrema[df_extrema$species==sp &
+                   df_extrema$clim==names(list_rast_min)[i]&
+                   df_extrema$limit=="qhigh",c("value_exp","range_exp")]=list(q95,
+                                                                              q95-q05)
+      df_extrema[df_extrema$species==sp &
+                   df_extrema$clim==names(list_rast_min)[i]&
+                   df_extrema$limit=="qlow",c("value_exp","range_exp")]=list(q05,
+                                                                             q95-q05)
+    }
+    
+  }
+  
+  df_extrema<-df_extrema |> 
+    mutate(dif=case_when(limit=="qhigh"~100*(value_exp-value_nfi)/range_exp,
+                         limit=="qlow"~100*(value_nfi-value_exp)/range_exp)) 
+  return(df_extrema)
+  
+}
+
 
 check_selection <- function(phylo.select,
                             data_gbif,

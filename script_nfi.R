@@ -8,7 +8,7 @@ library(targets)
 #Options
 source("R/functions_data.R")
 options(tidyverse.quiet = TRUE)
-tar_option_set(packages = c("stringr","ggplot2","tidyr","dplyr","terra","factoextra","modi","tibble","mastif"),
+tar_option_set(packages = c("rworldmap","stringr","ggplot2","tidyr","dplyr","terra","factoextra","modi","tibble","mastif"),
                error = "continue") 
 
 mastif.eu=tar_read(mastif.eu,store = "target_data_2")
@@ -151,15 +151,56 @@ list(
                   fecundity.eu_clim)
   ),
   tar_target(
-    species_selection,
-    species_selection_gbif
+    species_selection_narrow,
+    intersect(species_selection_gbif$select.rank,species_selection_nfi$select.rank)
   ),
+  tar_target(
+    species_selection_medium,
+    intersect(species_selection_gbif$select.quant,species_selection_nfi$select.quant)
+  ),
+  tar_target(
+    species_selection_large,
+    unique(c(species_selection_gbif$select.quant,species_selection_nfi$select.quant))
+  ),
+  # tar_target(
+  #   phylo.select,
+  #   species.phylo |>
+  #     inner_join(species_class) |>  # keep only species present in nfi and mastif
+  #     filter(species %in% species_selection_narrow) # filter selection
+  #     
+  # ),
   tar_target(
     phylo.select,
     species.phylo |>
       inner_join(species_class) |>  # keep only species present in nfi and mastif
-      filter(species %in% species_selection$select.quant) # filter selection
-      
+      filter(species %in% species_selection_narrow) |> 
+      separate(species_l,into=c("genus","species_only"),remove=FALSE) |> 
+      mutate(s_p=str_replace(species_l," ","_"),
+             sp_little=paste0(tolower(substr(genus,1,4)),substr(species_only,1,4)),
+             dir.sp=case_when(block=="america"~paste0("data/USTreeAtlas-main/shp/",sp_little),
+                              block=="europe"~paste0("data/chorological_maps_dataset/",species_l,"/shapefiles")),
+             direx=dir.exists(dir.sp)) |> 
+      filter(direx) |> 
+      mutate(
+        file.sp=case_when(block=="america"~sp_little,
+                          block=="europe"~paste0(s_p,"_plg")),
+        file.sp=case_when(species=="fagusSylvatic"~"Fagus_sylvatica_sylvatica_plg",
+                          species=="quercusIlex"~"Quercus_ilex_ilex_plg",
+                          TRUE~file.sp),
+        filex=file.exists(file.path(dir.sp,paste0(file.sp,".shp"))) 
+      ) |>
+      filter(filex)
+    
+  ),
+  tar_target(
+    selection_expertmaps,
+    select_species_expert(map_file="data/CHELSA/CHELSA_bio12_1981-2010_V.2.1.tif",
+                          pet_file="data/CHELSA/CHELSA_pet_penman_mean_1981-2010_V.2.1.tif",
+                          mat_file="data/CHELSA/CHELSA_bio1_1981-2010_V.2.1.tif",
+                          species_selection_gbif,
+                          species_selection_nfi,
+                          phylo.select
+    )
   ),
   NULL
 )
