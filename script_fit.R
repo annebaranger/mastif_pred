@@ -14,10 +14,10 @@ tar_option_set(packages = c("stringr","ggplot2","tidyr","dplyr","terra",
                error = "continue",
                memory = "transient") 
 future::plan(future::multisession, workers = 6)
-fecundity.eu_clim=tar_read(fecundity.eu_clim,store="target_nfi_2")
-fecundity.am_clim=tar_read(fecundity.am_clim,store="target_nfi_2")
-phylo.select=tar_read(phylo.select,store="target_nfi_2")
-species_selection=tar_read(species_selection,store="target_nfi_2")
+fecundity.eu_clim=tar_read(fecundity.eu_clim,store="target_nfi")
+fecundity.am_clim=tar_read(fecundity.am_clim,store="target_nfi")
+phylo.select=tar_read(phylo.select,store="target_nfi")
+species_selection=phylo.select$species
 
 #Targets
 list(
@@ -39,7 +39,7 @@ list(
     raw_data(fecundity.eu_clim,
              fecundity.am_clim,
              phylo.zone,
-             species_selection$select.quant,
+             species_selection,
              thresh=0.1)
   ),
   tar_target(
@@ -47,7 +47,7 @@ list(
     raw_data(fecundity.eu_clim,
              fecundity.am_clim,
              phylo.zone,
-             species_selection$select.quant,
+             species_selection,
              thresh=0.25)
   ),
   # tar_target(
@@ -99,35 +99,35 @@ list(
   tar_target(
     fitcontinentdiscrete_25,
     fit.continent.discrete(fecundity.fit.25,
-                           folder="model/continent_discrete_25_newfit")
+                           folder="model/continent_discrete_25")
   ),
   tar_target(
     fitcontinentdiscreteexcl_25,
     fit.continent.discrete.excl(fecundity.fit.25,
-                                folder="model/continent_discrete_25_newfit")
+                                folder="model/continent_discrete_25")
   ),
   tar_target(
     fitcontinentcontinous_25,
     fit.continent.continous(fecundity.fit.25,
                             excluded=TRUE,
-                            folder="model/continent_continous_25_newfit")
+                            folder="model/continent_continous_25")
   ),
   tar_target(
     fitspecies_25,
     fit.species(fecundity.fit.25,
-                folder="model/species_continuous_25_newfit")
+                folder="model/species_continuous_25")
   ),
   tar_target(
     fitbiomecontinuous_25,
     fit.biome.continuous(fecundity.fit.25,
                          species.biome,
-                         folder="model/biome_continous_25_newfit")
+                         folder="model/biome_continous_25")
   ),
   tar_target(
     fitbiomediscrete_25,
     fit.biome.discrete(fecundity.fit.25,
                        species.biome,
-                       folder="model/biome_discrete_25_newfit")
+                       folder="model/biome_discrete_25")
   ),
   NULL
   )

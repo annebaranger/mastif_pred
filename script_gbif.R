@@ -10,8 +10,8 @@ options(tidyverse.quiet = TRUE)
 sf::sf_use_s2(FALSE)
 tar_option_set(packages = packages.in)
 
-species.eu=tar_read(species.eu,store = "target_data_2")
-species.am=tar_read(species.am,store = "target_data_2")
+species.eu=tar_read(species.eu,store = "target_data")
+species.am=tar_read(species.am,store = "target_data")
 
 list(
   

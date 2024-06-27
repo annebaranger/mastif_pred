@@ -339,16 +339,16 @@ select_species_expert<-function(map_file="data/CHELSA/CHELSA_bio12_1981-2010_V.2
   pet_raster=terra::rast(pet_file)
   mat_raster=terra::rast(mat_file)
   dh_raster=pet_raster-map_raster/12
-  list_rast_min <- lapply(list(mat=mat_raster,
-                               dh=dh_raster), 
-                          function(r) {
-                            aggregate(r, fact = 10,fun="min")
-                            })
-  list_rast_max <- lapply(list(mat=mat_raster,
-                               dh=dh_raster), 
-                          function(r) {
-                            aggregate(r, fact = 10,fun="max")
-                          })
+  list_rast <- lapply(list(mat=mat_raster,
+                           dh=dh_raster),
+                      function(r){
+                        aggregate(r, fact = 10,fun="mean",na.rm=TRUE)
+                        })
+  # list_rast_max <- lapply(list(mat=mat_raster,
+  #                              dh=dh_raster), 
+  #                         function(r) {
+  #                           aggregate(r, fact = 10,fun="max")
+  #                         })
   sf::sf_use_s2(FALSE)
   usmap <- sf::st_as_sf(getMap(resolution = "high")) |> 
     sf::st_crop(xmin=-170,xmax=-55,ymin=025,ymax=90)
@@ -378,16 +378,16 @@ select_species_expert<-function(map_file="data/CHELSA/CHELSA_bio12_1981-2010_V.2
       sf::st_intersection(continent.map)
     
     for(i in 1:2){
-      terra::mask(list_rast_min[[i]],vect(sp_map))->mask_min
-      terra::mask(list_rast_max[[i]],vect(sp_map))->mask_max
+      terra::mask(list_rast[[i]],vect(sp_map))->mask_min
+      terra::mask(list_rast[[i]],vect(sp_map))->mask_max
       q05=global(mask_min, quantile, probs=c(0.05), na.rm=TRUE)[["X5."]]
       q95=global(mask_min, quantile, probs=c(0.95), na.rm=TRUE)[["X95."]]
       df_extrema[df_extrema$species==sp &
-                   df_extrema$clim==names(list_rast_min)[i]&
+                   df_extrema$clim==names(list_rast)[i]&
                    df_extrema$limit=="qhigh",c("value_exp","range_exp")]=list(q95,
                                                                               q95-q05)
       df_extrema[df_extrema$species==sp &
-                   df_extrema$clim==names(list_rast_min)[i]&
+                   df_extrema$clim==names(list_rast)[i]&
                    df_extrema$limit=="qlow",c("value_exp","range_exp")]=list(q05,
                                                                              q95-q05)
     }

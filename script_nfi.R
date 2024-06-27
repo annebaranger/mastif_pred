@@ -11,8 +11,8 @@ options(tidyverse.quiet = TRUE)
 tar_option_set(packages = c("rworldmap","stringr","ggplot2","tidyr","dplyr","terra","factoextra","modi","tibble","mastif"),
                error = "continue") 
 
-mastif.eu=tar_read(mastif.eu,store = "target_data_2")
-mastif.am=tar_read(mastif.am,store = "target_data_2")
+mastif.eu=tar_read(mastif.eu,store = "target_data")
+mastif.am=tar_read(mastif.am,store = "target_data")
 # meanClimate_species=tar_read(meanClimate_species,store="target_gbif")
 
 #Targets
@@ -138,7 +138,7 @@ list(
   ## create a dataframe with species selection and phylogeny
   tar_target(
     species.phylo.file,
-    "target_data_2/objects/species.phylo",
+    "target_data/objects/species.phylo",
     format="file"
   ),
   tar_target(
@@ -173,7 +173,7 @@ list(
     phylo.select,
     species.phylo |>
       inner_join(species_class) |>  # keep only species present in nfi and mastif
-      filter(species %in% species_selection_narrow) |> 
+      filter(species %in% species_selection_large) |> 
       separate(species_l,into=c("genus","species_only"),remove=FALSE) |> 
       mutate(s_p=str_replace(species_l," ","_"),
              sp_little=paste0(tolower(substr(genus,1,4)),substr(species_only,1,4)),
