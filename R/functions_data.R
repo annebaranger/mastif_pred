@@ -124,6 +124,63 @@ get_specieslist <- function(species.list,block){
   return(all.species)
 }
 
+#' List authors according to mastif data used
+#' @param mastif.eu Mastif plots from Europe
+#' @param mastif.am Mastif plots from america
+#' @param file.plot file to authors by plots
+#' @param file.authors file to authors contact
+get_authors<-function(mastif.am,
+                      mastif.eu,
+                      file.plot="data/authors/mastifPlotData.csv",
+                      file.authors="data/authors/mastAuthorEmails_2-8.csv"){
+  # get plot list
+  plot_list<-read.csv(file.plot) |> 
+    mutate(plot_old=plot,
+           plot=str_remove(plot_old,"_"))
+  # get mastif plots
+  plot_mastif<-rbind(mastif.am$df.allplot,
+                    mastif.eu$df.allplot)
+  # get authors contact
+  authors_list<-read.csv(file.authors) |> 
+    mutate(last=case_when(email=="rdelrio@infor.cl"~"del Rio",
+                          TRUE~last),
+           id_authors=paste(first,last, sep = "_")) 
+  
+  # get mastif plots in plot list
+  plot_in<-plot_list |> filter(plot%in% plot_mastif$plotID) |> 
+    mutate(authors_list=str_split(id," ")) 
+  
+  # get authors associated with plots and their contacts
+  authors_plot<-unique(unlist(plot_in$authors_list))
+  authors_in<-authors_list |> 
+    filter(id_authors%in%authors_plot)
+  
+  # get authors without contact
+  authors_nocontact<-authors_plot[!authors_plot%in%authors_in$id_authors]
+  
+  ## match unrecognized authors
+  closest_matches <- lapply(authors_nocontact,
+                            function(x){authors_list$id_authors[which.min(adist(x,authors_list$id_authors))]})
+  string_dist<- lapply(authors_nocontact,
+                       function(x){min(adist(x,authors_list$id_authors))})
+  names_match<- data.frame(authors=authors_nocontact,
+                           matched_authors=unlist(closest_matches),
+                           string_dist=unlist(string_dist)) |> 
+    filter(nchar(authors)!=0,
+           string_dist<7) |> 
+    filter(!((string_dist==6)&abs(nchar(authors)-nchar(matched_authors))<=2)) 
+  
+  authors_in<-rbind(authors_in,
+                    authors_list[authors_list$id_authors%in%names_match$matched_authors,])
+  authors_nocontact<-authors_plot[!authors_plot%in%c(authors_in$id_authors,names_match$authors)]
+  
+
+  plot_out<-plot_mastif |> filter(!plotID%in%plot_in$plot)
+  
+  return(list(plot_unmatched=plot_out,
+              authors_in=authors_in,
+              authors_nocontact=authors_nocontact))
+}
 
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 #### Section 2- Species selection ####

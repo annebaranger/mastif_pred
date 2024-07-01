@@ -8,7 +8,7 @@ library(targets)
 #Options
 source("R/functions_data.R")
 options(tidyverse.quiet = TRUE)
-tar_option_set(packages = c("stringr","ggplot2","tidyr","dplyr","terra","factoextra","taxize"),
+tar_option_set(packages = c("stringr","stringdist","ggplot2","tidyr","dplyr","terra","factoextra","taxize"),
                error = "continue") 
 
 #Targets
@@ -40,6 +40,13 @@ list(
   tar_target(
     species.phylo,
     rbind(species.am,species.eu)
+  ),
+  tar_target(
+    authors,
+    get_authors(mastif.am,
+                mastif.eu,
+                file.plot="data/authors/mastifPlotData.csv",
+                file.authors="data/authors/mastAuthorEmails_2-8.csv")
   ),
   NULL
 )

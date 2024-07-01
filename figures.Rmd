@@ -33,26 +33,26 @@ common_theme <- theme(
 ```{r data, include=FALSE}
 
 # load necessary data #
-tar_load(species_selection,store="target_nfi_2")
+tar_load(species_selection_large,store="target_nfi")
 
 ## species selection ##
-tar_load(sp.select.eu,store="target_nfi_2")
-tar_load(sp.select.am,store="target_nfi_2")
-tar_load(species_class,store="target_nfi_2")
-tar_load(species.biome,store="target_fit_2")
-fecundity.fit<-tar_read(fecundity.fit.25,store="target_fit_2")
+tar_load(sp.select.eu,store="target_nfi")
+tar_load(sp.select.am,store="target_nfi")
+tar_load(species_class,store="target_nfi")
+tar_load(species.biome,store="target_fit")
+fecundity.fit<-tar_read(fecundity.fit.25,store="target_fit")
 
 ## fecundity data ##
-tar_load(fecundity.eu_clim,store="target_nfi_2")
-tar_load(fecundity.am_clim,store="target_nfi_2")
+tar_load(fecundity.eu_clim,store="target_nfi")
+tar_load(fecundity.am_clim,store="target_nfi")
 
 worldmap <- sf::st_as_sf(getMap(resolution = "high"))
 
 # model output
-fitbiomecontinuous<-tar_read(fitbiomecontinuous_25,store="target_fit_2")
-fitbiomediscrete<-tar_read(fitbiomediscrete_25,store="target_fit_2")
-fitcontinentdiscrete<-tar_read(fitcontinentdiscrete_25,store="target_fit_2")
-fitspecies<-tar_read(fitspecies_25,store="target_fit_2")
+fitbiomecontinuous<-tar_read(fitbiomecontinuous_25,store="target_fit")
+fitbiomediscrete<-tar_read(fitbiomediscrete_25,store="target_fit")
+fitcontinentdiscrete<-tar_read(fitcontinentdiscrete_25,store="target_fit")
+fitspecies<-tar_read(fitspecies_25,store="target_fit")
 ```
 
 # Introduction
@@ -60,7 +60,7 @@ fitspecies<-tar_read(fitspecies_25,store="target_fit_2")
 # Material & method
 
 ```{r}
-tar_load(c(phylo.select),store="target_nfi_2")
+tar_load(c(phylo.select),store="target_nfi")
 data_gbif=tar_read(data_gbif_filtered,store="target_gbif")
 
 mastif_data<-rbind(tar_read(mastif.am,store="target_data_2")$df.tree, 
