@@ -939,7 +939,7 @@ get_stemdata<-function(fecundity_data,
     filter(!is.na(fecGmMu))
   
   return(list(plot_shade=shade_plot,
-              cor_plot=cor_plot,
+              plot_cor=plot_cor,
               unmatched_plot=unmatched_plot))
   
   }

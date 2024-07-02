@@ -202,5 +202,15 @@ list(
                           phylo.select
     )
   ),
+  tar_target(
+    stemData_eu,
+    get_stemdata(fecundity.eu_clim,
+                 "data/inventories/europe/stemData.rdata")
+  ),
+  tar_target(
+    stemData_am,
+    get_stemdata(fecundity.am_clim,
+                 "data/inventories/northamerica/stemData.rdata")
+  ),
   NULL
 )
