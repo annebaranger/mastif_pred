@@ -862,6 +862,88 @@ get_nfipred_plot<-function(continent="europe",
     return(plotData)
 }
 
+#' get stemp data
+#' @param nfi.data
+#' @param stem.data description
+get_stemdata<-function(fecundity_data,
+                       stemData_file){
+  plot_nfi_old<-fecundity_data |> select(plot,lat,lon) |> unique()
+  plot_nfi_tree<-loadRData(stemData_file) |> select(plot,lat,lon) |> mutate(inNew=TRUE) |> unique()
+  
+  # common plots
+  common_plots<-plot_nfi_old |> 
+    left_join(plot_nfi_tree,by=c("plot","lat","lon"))
+  
+  # match by coordinate
+  matched_plot_bycoord<-common_plots |> 
+    filter(is.na(inNew)) |> select(-inNew) |> 
+    left_join(plot_nfi_tree,by=c("lat","lon")) |> 
+    rowwise() |>
+    mutate(stringdist=adist(plot.x,plot.y))
+  
+  plot_cor<- rbind(common_plots |> 
+                     filter(inNew) |>
+                     mutate(plot.new=plot,stringdist=0),
+                   matched_plot_bycoord |> 
+                     filter(stringdist<3) |>
+                     rename(plot.new=plot.y,plot=plot.x)) |> 
+    unique() |> 
+    select(-inNew)
+  
+  # match remaining plot by name similarity
+  unmatched_plot<-plot_nfi_old |> 
+    filter(!plot%in%plot_cor$plot)
+  len_quant<-max(2,dim(unmatched_plot)[1]/1500)
+  lat_breaks<-as.numeric(quantile(unmatched_plot$lat,probs=seq(0,1,length.out=len_quant)))
+  LETTERS2<-c(letters[1:26],LETTERS[1:26],
+              paste0("a",LETTERS[1:26]),
+              paste0("b",LETTERS[1:26]))
+  unmatched_plot<-unmatched_plot |> 
+    mutate(lat_cat=cut(lat, 
+                       breaks = lat_breaks,
+                       labels = LETTERS2[1:(length(lat_breaks)-1)],
+                       include.lowest=TRUE))
+  unmatched_plot_new<-plot_nfi_tree |> 
+    filter(!plot%in%plot_cor$plot.new) |> 
+    mutate(lat_cat=cut(lat, 
+                       breaks = lat_breaks,
+                       labels = LETTERS2[1:(length(lat_breaks)-1)],
+                       include.lowest=TRUE))
+  
+  for(let in LETTERS2[1:(length(lat_breaks)-1)]){
+    print(let)
+    unmatched_plot_new_sub<-unmatched_plot_new |> filter(lat_cat==let)
+    matched_plot_bystring<-unmatched_plot |> 
+      filter(lat_cat==let) |> 
+      rowwise() |> 
+      mutate(plot.new=unmatched_plot_new_sub$plot[which.min(adist(plot,unmatched_plot_new_sub$plot))],
+             stringdist=min(adist(plot,unmatched_plot_new_sub$plot))) |> 
+      filter(stringdist < 6) 
+    plot_cor<-rbind(plot_cor ,
+                    matched_plot_bystring |> select(-lat_cat))
+  }
+  
+ 
+  unmatched_plot<-plot_nfi_old |> 
+    filter(!plot%in%plot_cor$plot)
+  
+  # create stemdata
+  shade_plot<-loadRData(stemData_file) |> 
+    filter(plot%in%plot_cor$plot.new) |> 
+    group_by(plot,species) |> 
+    summarise(shade_mean=mean(shade,na.rm=TRUE)[[1]]) |> 
+    ungroup() |> 
+    rename(plot.new=plot) |> 
+    left_join(plot_cor[,c("plot","plot.new")],by="plot.new") |> 
+    left_join(fecundity_data,by=c("plot","species")) |> 
+    filter(!is.na(fecGmMu))
+  
+  return(list(plot_shade=shade_plot,
+              cor_plot=cor_plot,
+              unmatched_plot=unmatched_plot))
+  
+  }
+
 #' Get temporal variability
 #'@description uses timeseries of fecundity to compute wieghted mean, weighted variance
 #'and subsequent coefficient of variation of time series

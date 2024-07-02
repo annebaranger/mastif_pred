@@ -7,11 +7,11 @@ tar_visnetwork()
 
 Sys.setenv("TAR_PROJECT"="data_gbif")
 tar_visnetwork()
-tar_make()
+# tar_make()
 
 Sys.setenv("TAR_PROJECT"="data_nfi")
 tar_visnetwork()
-tar_make()
+# tar_make()
 
 Sys.setenv("TAR_PROJECT"="fit")
 tar_visnetwork()
