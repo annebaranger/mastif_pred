@@ -18,7 +18,7 @@ future::plan(future::multisession, workers = 6)
 fecundity.eu_clim=tar_read(fecundity.eu_clim,store="target_nfi")
 fecundity.am_clim=tar_read(fecundity.am_clim,store="target_nfi")
 # species_selection_narrow=tar_read(species_selection_narrow,store="target_nfi")
-phylo.select=tar_read(phylo.select,store="target_nfi")# |>
+phylo.select=tar_read(phylo.select,store="target_nfi") #|>
   # filter(species%in%species_selection_narrow)
 species_selection=phylo.select$species
 
