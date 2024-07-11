@@ -114,6 +114,12 @@ list(
                        fecundity.am_clim,
                        mastif.am,
                        mastif.eu)),
+  tar_target(
+    species_selection_nfi_margin,
+    select_species_nfi_margin(fecundity.eu_clim,
+                              fecundity.am_clim,
+                              mastif.am,
+                              mastif.eu)),
   tar_target(gbif_niche_file,
              "output/sp_gbif_climate.csv",
              format = "file"),
@@ -124,6 +130,11 @@ list(
     select_species_gbif(gbif_niche,
                         mastif.am,
                         mastif.eu)),
+  tar_target(
+    species_selection_gbif_margin,
+    select_species_gbif_margin(gbif_niche,
+                               mastif.am,
+                               mastif.eu)),
   
   # tar_target(
   #   sp.select.am,
@@ -162,6 +173,11 @@ list(
     species_selection_large,
     unique(c(species_selection_gbif$select.quant,species_selection_nfi$select.quant))
   ),
+  tar_target(
+    species_selection_narrow_margin,
+    species_selection_nfi_margin$species_quant |> 
+      filter(species%in%species_selection_gbif_margin$species_quant$species)
+  ),
   # tar_target(
   #   phylo.select,
   #   species.phylo |>
@@ -192,6 +208,31 @@ list(
       filter(filex)
     
   ),
+  tar_target(
+    phylo.select_margin,
+    species.phylo |> # species in mastif
+      inner_join(species_class) |>  # keep only species present in nfi and mastif
+      left_join(species_selection_narrow_margin) |> 
+      filter(!is.na(cold_valid)) |> 
+      separate(species_l,into=c("genus","species_only"),remove=FALSE) |> 
+      mutate(s_p=str_replace(species_l," ","_"),
+             sp_little=paste0(tolower(substr(genus,1,4)),substr(species_only,1,4)),
+             dir.sp=case_when(block=="america"~paste0("data/USTreeAtlas-main/shp/",sp_little),
+                              block=="europe"~paste0("data/chorological_maps_dataset/",species_l,"/shapefiles")),
+             direx=dir.exists(dir.sp)) |> 
+      filter(direx) |> 
+      mutate(
+        file.sp=case_when(block=="america"~sp_little,
+                          block=="europe"~paste0(s_p,"_plg")),
+        file.sp=case_when(species=="fagusSylvatic"~"Fagus_sylvatica_sylvatica_plg",
+                          species=="quercusIlex"~"Quercus_ilex_ilex_plg",
+                          TRUE~file.sp),
+        filex=file.exists(file.path(dir.sp,paste0(file.sp,".shp"))) 
+      ) |>
+      filter(filex)
+    
+  ),
+  
   tar_target(
     selection_expertmaps,
     select_species_expert(map_file="data/CHELSA/CHELSA_bio12_1981-2010_V.2.1.tif",

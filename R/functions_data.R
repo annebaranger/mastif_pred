@@ -287,7 +287,6 @@ select_species_nfi<-function(fecundity.eu_clim,
 
 
 
-
 #' Select species based on GBIF
 #' @description Compare climatic distribution of GBIF plots and MASTIF plots. 
 #' Select species for which only MASTIF coverage is large enough compared to GBIF
@@ -299,7 +298,6 @@ select_species_nfi<-function(fecundity.eu_clim,
 select_species_gbif<-function(gbif_niche,
                               mastif.am,
                               mastif.eu){
-  
   mastif.species.niche<-rbind(mastif.am$df.tree, 
                               mastif.eu$df.tree) |> 
     mutate(dh=pet-(map/12)) |> 
@@ -335,7 +333,7 @@ select_species_gbif<-function(gbif_niche,
     select(-qrange.mastif,-rrange.mastif)
   
   gbif_niche<-gbif_niche[,c("species","mat.qhigh","mat.qlow","mat.rhigh","mat.rlow",
-                 "dh.qhigh","dh.qlow","dh.rhigh","dh.rlow")]|> 
+                            "dh.qhigh","dh.qlow","dh.rhigh","dh.rlow")]|> 
     separate(species,into=c("genus","sp")) |> 
     mutate(species=paste0(substr(tolower(genus),1,8),substr(str_to_title(sp),1,8))) |> 
     select(-genus,-sp) |> 
@@ -372,6 +370,218 @@ select_species_gbif<-function(gbif_niche,
   return(list(df.quant=gbif_niche,
               select.rank=select.rank,
               select.quant=select.quant))
+}
+
+#' Select species based on NFI and margin type
+#' @description Compare climatic distribution of NFI plots and MASTIF plots. 
+#' Select species for which only MASTIF coverage is large enough compared to NFI.
+#' @param fecundity.eu_clim NFI plots for European species
+#' @param fecundity.am_clim NFI plots for American species
+#' @param mastif.eu MASTIF data for European species
+#' @param mastif.am MASTIF data for American species
+select_species_nfi_margin<-function(fecundity.eu_clim,
+                             fecundity.am_clim,
+                             mastif.eu,
+                             mastif.am){
+  
+  mastif.species.niche<-rbind(mastif.am$df.tree, 
+                              mastif.eu$df.tree) |> 
+    mutate(dh=pet-(map/12)) |> 
+    mutate(fecEstSe=na_if(fecEstSe,0),
+           fecEstMu=na_if(fecEstMu,0)) |> 
+    filter(!is.na(fecEstMu)) |> filter(!is.na(fecEstSe)) |> 
+    # compute numbers of observations per plot
+    group_by(plotID,species,mat,dh) |> 
+    summarise(n_plot=n(),
+              fecEstMu_plot=mean(fecEstMu,na.rm=TRUE),
+              se_plot=sqrt(sum(fecEstSe^2)/n_plot),
+              cv_plot=se_plot/fecEstMu_plot) |> 
+    # Compute mean of se per plot
+    ungroup() |> 
+    pivot_longer(cols=c("mat","dh"),
+                 names_to = "clim",
+                 values_to = "clim_val")  |> 
+    filter(!is.na(clim_val)) |> 
+    group_by(species,clim) |>
+    summarise(#opt=weighted.quantile(clim_val,1/cv_plot,prob=0.5)[1],
+      qlow=weighted.quantile(clim_val,1/cv_plot,prob=0.025)[1],#,probs=0.1)[1],
+      qhigh=weighted.quantile(clim_val,1/cv_plot,prob=0.975)[1],
+      qrange.mastif=qhigh-qlow,
+      rhigh=weighted.quantile(clim_val,1/cv_plot, prob = 1- min(5, n())/n())[1],
+      rlow=weighted.quantile(clim_val,1/cv_plot, prob = min(5, n())/n())[1],
+      rrange.mastif=rhigh-rlow) |> 
+    ungroup() |> 
+    pivot_longer(cols=c("qlow","qhigh","rhigh","rlow"),
+                 names_to = "limit",
+                 values_to = "value_mastif") |> 
+    mutate(range.mastif=case_when(grepl("q",limit)~qrange.mastif,
+                                  grepl("r",limit)~rrange.mastif)) |> 
+    select(-qrange.mastif,-rrange.mastif)
+  
+  nfi.species.niche<-rbind(fecundity.eu_clim,
+                           fecundity.am_clim) |> 
+    # mutate(dh=12*pet-map) |> 
+    filter(BA!=0) |> 
+    filter(dh>(-2500)) |>
+    pivot_longer(cols=c("mat","dh"),
+                 names_to = "clim",
+                 values_to = "clim_val")  |> 
+    filter(!is.na(clim_val)) |> 
+    group_by(species,clim) |>
+    summarise(#opt=weighted.quantile(clim_val,BA,prob=0.5)[1],
+      qlow=weighted.quantile(clim_val,BA,prob=0.025)[1],#,probs=0.1)[1],
+      qhigh=weighted.quantile(clim_val,BA,prob=0.975)[1],
+      qrange.nfi=qhigh-qlow,
+      rhigh=weighted.quantile(clim_val,BA, prob = 1- min(5, n())/n())[1],
+      rlow=weighted.quantile(clim_val,BA, prob = min(5, n())/n())[1],
+      rrange.nfi=rhigh-rlow) |> 
+    ungroup() |> 
+    pivot_longer(cols=c("qlow","qhigh","rhigh","rlow"),
+                 names_to = "limit",
+                 values_to = "value_nfi") |> 
+    mutate(range.nfi=case_when(grepl("q",limit)~qrange.nfi,
+                               grepl("r",limit)~rrange.nfi)) |> 
+    select(-qrange.nfi,-rrange.nfi)
+  
+  
+  mastif.species.niche |> 
+    left_join(nfi.species.niche,by=c("species","clim","limit")) |> 
+    filter(!is.na(range.nfi)) |> 
+    mutate(dev=case_when(grepl("high",limit)~100*(value_mastif-value_nfi)/range.nfi,
+                         grepl("low",limit)~100*(value_nfi-value_mastif)/range.nfi)) |> 
+    filter(grepl("r",limit)) |> 
+    select(species,clim,limit,dev) |> 
+    pivot_wider(names_from = c("clim","limit"),values_from = "dev") |> 
+    group_by(species) |> 
+    summarise(dh_valid=case_when((dh_rlow>(-30)&dh_rhigh>(-30))~TRUE,
+                                 TRUE~FALSE),
+              hot_valid=case_when((dh_rhigh>(-30))~TRUE,
+                                  TRUE~FALSE),
+              cold_valid=case_when((dh_rlow>(-30))~TRUE,
+                                   TRUE~FALSE)) |> 
+    filter(!(!hot_valid&!cold_valid)) -> species_rank
+  mastif.species.niche |> 
+    left_join(nfi.species.niche,by=c("species","clim","limit")) |> 
+    filter(!is.na(range.nfi)) |> 
+    mutate(dev=case_when(grepl("high",limit)~100*(value_mastif-value_nfi)/range.nfi,
+                         grepl("low",limit)~100*(value_nfi-value_mastif)/range.nfi)) |> 
+    filter(grepl("q",limit)) |> 
+    select(species,clim,limit,dev) |> 
+    pivot_wider(names_from = c("clim","limit"),values_from = "dev") |> 
+    group_by(species) |> 
+    summarise(dh_valid=case_when((dh_qlow>(-30)&dh_qhigh>(-30))~TRUE,
+                                 TRUE~FALSE),
+              hot_valid=case_when((dh_qhigh>(-30))~TRUE,
+                                  TRUE~FALSE),
+              cold_valid=case_when((dh_qlow>(-30))~TRUE,
+                                   TRUE~FALSE)) |> 
+    filter(!(!hot_valid&!cold_valid)) -> species_quant
+  
+  return(list(species_rank=species_rank,
+              species_quant=species_quant))
+}
+
+
+
+#' Select species based on GBIF and margin type
+#' @description Compare climatic distribution of GBIF plots and MASTIF plots. 
+#' Select species for which only MASTIF coverage is large enough compared to GBIF
+#' @note  NFI plots do not always cover the whole distribution of species 
+#' @param fecundity.eu_clim NFI plots for European species
+#' @param fecundity.am_clim NFI plots for American species
+#' @param mastif.eu MASTIF data for European species
+#' @param mastif.am MASTIF data for American species
+select_species_gbif_margin<-function(gbif_niche,
+                                     mastif.am,
+                                     mastif.eu){
+  
+  mastif.species.niche<-rbind(mastif.am$df.tree, 
+                              mastif.eu$df.tree) |> 
+    mutate(dh=pet-(map/12)) |> 
+    mutate(fecEstSe=na_if(fecEstSe,0),
+           fecEstMu=na_if(fecEstMu,0)) |> 
+    filter(!is.na(fecEstMu)) |> filter(!is.na(fecEstSe)) |> 
+    # compute numbers of observations per plot
+    group_by(plotID,species,mat,dh) |> 
+    summarise(n_plot=n(),
+              fecEstMu_plot=mean(fecEstMu,na.rm=TRUE),
+              se_plot=sqrt(sum(fecEstSe^2)/n_plot),
+              cv_plot=se_plot/fecEstMu_plot) |> 
+    # Compute mean of se per plot
+    ungroup() |> 
+    pivot_longer(cols=c("mat","dh"),
+                 names_to = "clim",
+                 values_to = "clim_val")  |> 
+    filter(!is.na(clim_val)) |> 
+    group_by(species,clim) |>
+    summarise(#opt=weighted.quantile(clim_val,1/cv_plot,prob=0.5)[1],
+      qlow=weighted.quantile(clim_val,1/cv_plot,prob=0.025)[1],#,probs=0.1)[1],
+      qhigh=weighted.quantile(clim_val,1/cv_plot,prob=0.975)[1],
+      qrange.mastif=qhigh-qlow,
+      rhigh=weighted.quantile(clim_val,1/cv_plot, prob = 1- min(5, n())/n())[1],
+      rlow=weighted.quantile(clim_val,1/cv_plot, prob = min(5, n())/n())[1],
+      rrange.mastif=rhigh-rlow) |> 
+    ungroup() |> 
+    pivot_longer(cols=c("qlow","qhigh","rhigh","rlow"),
+                 names_to = "limit",
+                 values_to = "value_mastif") |> 
+    mutate(range.mastif=case_when(grepl("q",limit)~qrange.mastif,
+                                  grepl("r",limit)~rrange.mastif)) |> 
+    select(-qrange.mastif,-rrange.mastif)
+  
+  gbif_niche<-gbif_niche[,c("species","mat.qhigh","mat.qlow","mat.rhigh","mat.rlow",
+                            "dh.qhigh","dh.qlow","dh.rhigh","dh.rlow")]|> 
+    separate(species,into=c("genus","sp")) |> 
+    mutate(species=paste0(substr(tolower(genus),1,8),substr(str_to_title(sp),1,8))) |> 
+    select(-genus,-sp) |> 
+    pivot_longer(cols=c("mat.qhigh","mat.qlow","mat.rhigh","mat.rlow",
+                        "dh.qhigh","dh.qlow","dh.rhigh","dh.rlow"),
+                 names_to = "limit",
+                 values_to = "value_gbif") |> 
+    separate(limit,into=c("clim","limit")) |> 
+    mutate(type=str_sub(limit,1,1)) |> 
+    group_by(species,clim,type) |> 
+    mutate(range_gbif=max(value_gbif)-min(value_gbif)) 
+  
+  mastif.species.niche |> 
+    left_join(gbif_niche,by=c("species","clim","limit")) |> 
+    filter(!is.na(range_gbif)) |> 
+    mutate(dev=case_when(grepl("high",limit)~100*(value_mastif-value_gbif)/range_gbif,
+                         grepl("low",limit)~100*(value_gbif-value_mastif)/range_gbif)) |> 
+    filter(grepl("q",limit)) |> 
+    select(species,clim,limit,dev) |> 
+    pivot_wider(names_from = c("clim","limit"),values_from = "dev") |> 
+    group_by(species) |> 
+    summarise(dh_valid=case_when((dh_qlow>(-30)&dh_qhigh>(-30))~TRUE,
+                                 TRUE~FALSE),
+              hot_valid=case_when((dh_qhigh>(-30))~TRUE,
+                                  TRUE~FALSE),
+              cold_valid=case_when((dh_qlow>(-30))~TRUE,
+                                   TRUE~FALSE)) |> 
+    filter(!(!hot_valid&!cold_valid)) -> species_quant
+  
+  
+  mastif.species.niche |> 
+    left_join(gbif_niche,by=c("species","clim","limit")) |> 
+    filter(!is.na(range_gbif)) |> 
+    mutate(dev=case_when(grepl("high",limit)~100*(value_mastif-value_gbif)/range_gbif,
+                         grepl("low",limit)~100*(value_gbif-value_mastif)/range_gbif)) |> 
+    filter(grepl("r",limit)) |> 
+    select(species,clim,limit,dev) |> 
+    pivot_wider(names_from = c("clim","limit"),values_from = "dev") |> 
+    group_by(species) |> 
+    summarise(dh_valid=case_when((dh_rlow>(-30)&dh_rhigh>(-30))~TRUE,
+                                 TRUE~FALSE),
+              hot_valid=case_when((dh_rhigh>(-30))~TRUE,
+                                  TRUE~FALSE),
+              cold_valid=case_when((dh_rlow>(-30))~TRUE,
+                                   TRUE~FALSE)) |> 
+    filter(!(!hot_valid&!cold_valid)) -> species_rank
+  
+  
+  return(list(species_rank=species_rank,
+              species_quant=species_quant))
+
 }
 
 
@@ -931,7 +1141,8 @@ get_stemdata<-function(fecundity_data,
   shade_plot<-loadRData(stemData_file) |> 
     filter(plot%in%plot_cor$plot.new) |> 
     group_by(plot,species) |> 
-    summarise(shade_mean=mean(shade,na.rm=TRUE)[[1]]) |> 
+    summarise(shade_mean=mean(shade,na.rm=TRUE)[[1]],
+              shade_min=min(shade,na.rm=TRUE)[[1]]) |> 
     ungroup() |> 
     rename(plot.new=plot) |> 
     left_join(plot_cor[,c("plot","plot.new")],by="plot.new") |> 

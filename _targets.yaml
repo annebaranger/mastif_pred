@@ -13,3 +13,6 @@ fit:
 fit_narrow:
   script: script_fit.R
   store: target_fit_narrow
+fit_margin:
+  script: script_fit_margin.R
+  store: target_fit_margin

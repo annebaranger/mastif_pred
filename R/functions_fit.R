@@ -68,6 +68,58 @@ raw_data <- function(fecundity.eu_clim,
 }
 
 
+#' Format dataset for model with not all margin by species
+#' @param fecundity.eu_clim fecundity pred on nfi data, europe
+#' @param fecundity.am_clim fecundity pred on nfi data, america
+#' @param phylo.select information on species zone
+raw_data_margin <- function(fecundity.eu_clim, 
+                     fecundity.am_clim,
+                     phylo.select,
+                     species_selection,
+                     thresh=0.25){
+  fec_tot=rbind(fecundity.eu_clim |> mutate(block="europe"),
+                fecundity.am_clim|> mutate(block="america")) |>
+    left_join(phylo.select) |>
+    dplyr::select(plot,lon,lat,taxa,genus,species,BA,ISP,fecGmMu,fecGmSd,dh,pet,map,mat,block,zone,
+                  dh_valid,cold_valid,hot_valid) |>
+    filter(BA!=0) |> #rm absences
+    # mutate(dh=12*pet-map) |> 
+    filter(!is.na(ISP)) |> 
+    filter(species %in% species_selection) |> 
+    group_by(species) |> 
+    # compute weighted quantiles of sgdd and wai, and correlation between wai and sgdd
+    mutate(margin.temp=case_when(mat<=weighted.quantile(mat,w=BA, prob=thresh)[[1]]~"cold",
+                                 mat<weighted.quantile(mat,w=BA, prob=0.5+thresh/2)[[1]]&
+                                   mat>weighted.quantile(mat,w=BA, prob=0.5-thresh/2)[[1]]~"midtemp",
+                                 mat>=weighted.quantile(mat,w=BA, prob=1-thresh)[[1]]~"hot"),
+           margin.temp=factor(margin.temp,levels=c("midtemp","cold","hot")),
+           margin.deficit=case_when(dh<weighted.quantile(dh,w=BA, prob=thresh)[[1]]~"humid",
+                                    dh<weighted.quantile(dh,w=BA, prob=0.5+thresh/2)[[1]]&
+                                      dh>weighted.quantile(dh,w=BA, prob=0.5-thresh/2)[[1]]~"midhum",
+                                    dh>weighted.quantile(dh,w=BA, prob=1-thresh)[[1]]~"arid"),
+           margin.deficit=factor(margin.deficit,levels=c("midhum","humid","arid"))) |>
+    ungroup() |> 
+    # set as NA margin of species for which data do not cover the margin
+    mutate(margin.temp=case_when((margin.temp=="hot"&!hot_valid)~NA,
+                                 (margin.temp=="cold"&!cold_valid)~NA,
+                                 TRUE~margin.temp))
+  # mutate(ISP=fecGmMu/BA,
+  #        s_ISP=fecGmSd/(BA^2))
+  ecoregions=sf::read_sf(dsn="data/WWF/official", #read ecoregions
+                         layer="wwf_terr_ecos") |>
+    select(BIOME,ECO_NAME,geometry) |> 
+    filter(!BIOME%in%c(98,99))
+  sf::sf_use_s2(FALSE)
+  points=sf::st_as_sf(fec_tot[,c("lon","lat")],coords=c("lon","lat"),crs=sf::st_crs(ecoregions))
+  points_biome=sf::st_join(points,ecoregions) 
+  
+  fec_tot= cbind(fec_tot,
+                 biome=points_biome$BIOME) 
+  
+  return(fec_tot)
+}
+
+
 #' Associate each species to one biome
 #' @param fecundity.fit fec data wtih extracted biome 
 #' @param threshold threshold for prevalence below which biome are not selected 
