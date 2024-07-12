@@ -177,14 +177,39 @@ worldmap <- sf::st_as_sf(getMap(resolution = "high"))
 
 ### data
 ```{r}
-fitspecies<-tar_read(fitspecies_25,store="target_fit_narrow")
-fecundity.fit<-tar_read(fecundity.fit.25,store="target_fit_narrow")
-fitcontinentdiscrete<-tar_read(fitcontinentdiscrete_25,store="target_fit_narrow")
+fitspecies<-tar_read(fitspecies_25,store="target_fit_margin")
+fecundity.fit<-tar_read(fecundity.fit.25,store="target_fit_margin")
+fitcontinentdiscrete<-tar_read(fitcontinentdiscrete_25,store="target_fit_margin")
 ```
 
 
 ### figure
 ```{r}
+species_n=fecundity.fit |> 
+  filter(margin.temp%in%c("hot","cold")) |> 
+  select(zone,margin.temp,species) |> 
+  unique() |> 
+  group_by(zone,margin.temp) |> 
+  summarise(n=paste0("(",n(),")"))
+
+signif<- fitcontinentdiscrete |>
+  ungroup() |> 
+  group_by(zone,margin.temp) |> 
+  summarise(mean=mean(posterior),
+            q05=quantile(posterior,prob=0.05),
+            q95=quantile(posterior,prob=0.95)) |> 
+  mutate(signif=(sign(q05)==sign(q95)))
+
+text=fitcontinentdiscrete |> 
+  filter(margin.temp%in%c("cold","hot"))|> 
+  group_by(zone,margin.temp) |> summarise(med=median(posterior),ext=min(posterior)-0.1) |> 
+  left_join(species_n,by=c("zone","margin.temp")) |>
+  left_join(signif) |>
+  mutate(star=if_else(signif,"*",""),
+         margin.temp=case_when(margin.temp=="hot"~"Hot",
+                               margin.temp=="cold"~"Cold"),
+         zone=factor(zone,level=c("west","east","europe")))
+
 data_env<-fecundity.fit |> 
   filter(margin.temp%in%c("cold","hot"))|> 
   group_by(zone,species,margin.temp) |> 
@@ -197,10 +222,14 @@ fitcontinentdiscrete |>
   filter(margin.temp%in%c("cold","hot"))|> 
   mutate(margin.temp=case_when(margin.temp=="hot"~"Hot",
                                margin.temp=="cold"~"Cold")) |>
-  ggplot(aes(x=posterior,y=zone,fill=zone))+
-  geom_density_ridges(scale=0.6,color=NA)+
+  ggplot()+
+  geom_density_ridges(aes(x=posterior,y=zone,fill=zone),
+                      scale=0.6,color=NA)+
   geom_vline(xintercept = 0)+
+  geom_text(data=text,aes(label=star,x=med,y=zone,color=zone),vjust=1.2,size=6)+
+  geom_text(data=text,aes(label=n,x=med,y=zone),vjust=-0.5,size=3)+
   scale_fill_manual(values=c("firebrick4","firebrick1","slateblue"))+
+  scale_color_manual(values=c("firebrick4","firebrick1","slateblue"),guide="none")+
   facet_wrap(~margin.temp,nrow=2)+
   common_theme+
   theme(axis.text.y=element_blank(),
@@ -212,12 +241,12 @@ fitcontinentdiscrete |>
         panel.grid.minor.x = element_blank())+
   labs(x="Relative log-fecundity (species as random effect)",
        title="A. Posterior of continent scale model",
-       fill="Zone")->boxp
+       fill="Zone") ->boxp
   
 ```
 
 ```{r}
-model_data <- fitspecies |>
+model_data <-fitspecies |>
   ungroup() |> 
   left_join(data_env,by=c("species","margin.temp")) |> 
   filter(margin.temp%in%c("cold","hot"))|> 
@@ -232,11 +261,11 @@ model_data <- fitspecies |>
   group_by(margin.temp,zone) |> 
   do({
     model = lm(med.ISP ~ med.mat, data = .)
-    data.frame(broom::tidy(model), .[1, ])
-  }) %>%
-  mutate(significant = (p.value < 0.05) & term =="med.mat" ) |> 
-  group_by(zone,margin.temp) |>
-  filter(sum(significant)>=1) |>
+    anova_result <- anova(model)
+    p_value <- anova_result$`Pr(>F)`[1]
+    data.frame(broom::tidy(model), p_value = p_value, .[1, ])
+  }) %>% 
+  filter(p_value<0.1) |>
   # filter(zone=="europe") |> 
   dplyr::select(term,estimate,zone,margin.temp,max.mat,min.mat)
 model_data=model_data |> 
@@ -278,13 +307,13 @@ fitspecies |>
 
 cowplot::plot_grid(boxp,plt,ncol=2,rel_widths = c(2,1.5))  -> p
 p
-# ggsave( p,
-#         filename = "figure/main_fig_1.png",
-#         scale=1.2,
-#         dpi = 600,
-#         width = 17,
-#         height=12,
-#         units = "cm")
+ggsave( p,
+        filename = "figure/main_fig_1_margin.png",
+        scale=1.2,
+        dpi = 600,
+        width = 17,
+        height=12,
+        units = "cm")
 
 
 ```
@@ -317,13 +346,7 @@ tar_read(fitspecies_25,store="target_fit_2") |>
 ### results
 
 ```{r}
-fitcontinentdiscrete |>
-  ungroup() |> 
-  group_by(zone,margin.temp) |> 
-  summarise(mean=mean(posterior),
-            q05=quantile(posterior,prob=0.05),
-            q95=quantile(posterior,prob=0.95))
-
+signif
 
 fitspecies |>
   left_join(data_env) |> 
@@ -336,8 +359,8 @@ fitspecies |>
             q95=quantile(posterior, prob=0.95)[[1]]) |> 
   mutate(signif=!(q05<0&q95>0)) |> 
   ungroup() |> 
-  mutate(pos_eff=med.ISP>0) |> group_by(zone) |> mutate(n_sp=n())
-  group_by(zone,margin.temp,pos_eff) |> summarise(n_signif=sum(signif)/44)
+  mutate(pos_eff=med.ISP>0) |> group_by(zone) |> mutate(n_sp=n()) |> 
+  group_by(margin.temp,pos_eff) |> summarise(n_signif=sum(signif))
 
 
 model_data <- fitspecies |>
@@ -414,7 +437,7 @@ summary(lme_mod_rand)
 
 ### Data
 ```{r}
-fitbiomediscrete<-tar_read(fitbiomediscrete_25,store="target_fit_narrow")
+fitbiomediscrete<-tar_read(fitbiomediscrete_25,store="target_fit_margin")
 ```
 
 
@@ -474,7 +497,7 @@ fecundity.fit |> filter(species%in% species_selection_large) |> select(biome,spe
 
 ### data
 ```{r}
-fitbiomecontinuous<-tar_read(fitbiomecontinuous_25,store="target_fit_narrow")
+fitbiomecontinuous<-tar_read(fitbiomecontinuous_25,store="target_fit_margin")
 ```
 
 ### Figure
@@ -549,8 +572,8 @@ fecundity.fit |> group_by(biome)
 ```
 ## complementary analysis
 ```{r}
-fecundity.fit<-tar_read(fecundity.fit.25,store="target_fit")
-tar_load(species.biome,store="target_fit_narrow")
+fecundity.fit<-tar_read(fecundity.fit.25,store="target_fit_margin")
+tar_load(species.biome,store="target_fit_margin")
 data_aridity<-fecundity.fit |> 
   filter(!is.na(ISP)) |> 
   filter(!is.na(dh)) |>
@@ -565,7 +588,7 @@ data_aridity<-fecundity.fit |>
   filter(!is.na(dISP))
 
 data_aridity |> 
-  group_by(biome,species) |> 
+  group_by(biome,zone,species) |> 
   summarise(cor_dh_mat=cor.test(dh,mat,method="spearman")$estimate[[1]],
             pval_dh_mat=cor.test(dh,mat,method="spearman")$p.value,
             cor_disp_dh=cor.test(dh,dISP,method="spearman")$estimate[[1]],
@@ -574,7 +597,7 @@ data_aridity |>
                               TRUE~0),
          cor_disp_dh=case_when(pval_disp_dh<0.05~cor_disp_dh,
                               TRUE~0)) |> 
-  ggplot(aes(cor_dh_mat,cor_disp_dh,color=as.factor(biome)))+
+  ggplot(aes(cor_dh_mat,cor_disp_dh,color=as.factor(zone)))+
   geom_point()
   # pivot_longer(cols=c("cor_dh_mat","cor_disp_dh")) |> 
   # ggplot(aes(value))+

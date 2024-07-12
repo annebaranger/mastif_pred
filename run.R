@@ -16,3 +16,7 @@ tar_visnetwork()
 Sys.setenv("TAR_PROJECT"="fit")
 tar_visnetwork()
 # tar_make()
+
+Sys.setenv("TAR_PROJECT"="fit_margin")
+tar_visnetwork()
+# tar_make()
