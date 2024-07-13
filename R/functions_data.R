@@ -1072,7 +1072,7 @@ get_nfipred_plot<-function(continent="europe",
     return(plotData)
 }
 
-#' get stemp data
+#' get stem data
 #' @param nfi.data
 #' @param stem.data description
 get_stemdata<-function(fecundity_data,
@@ -1142,7 +1142,8 @@ get_stemdata<-function(fecundity_data,
     filter(plot%in%plot_cor$plot.new) |> 
     group_by(plot,species) |> 
     summarise(shade_mean=mean(shade,na.rm=TRUE)[[1]],
-              shade_min=min(shade,na.rm=TRUE)[[1]]) |> 
+              shade_min=min(shade,na.rm=TRUE)[[1]],
+              mean_dbh=mean(diam,na.rm=TRUE)) |> 
     ungroup() |> 
     rename(plot.new=plot) |> 
     left_join(plot_cor[,c("plot","plot.new")],by="plot.new") |> 
