@@ -329,7 +329,7 @@ tar_load(mastif.am,store="target_data")
 tar_load(stemData_am,store="target_nfi")
 
 stemAcerRubrum<-stemData_am$plot_shade |> 
-  filter(species=="acerRubrum") |> 
+  filter(species=="fagusGrandifo") |> 
   select(plot,lat,lon,mean_dbh,shade_min,dh,mat,cec30,slope,aspect,ISP,SIZE) |> 
   rename(Temperature=mat,
          `Moisture deficit`=dh,
@@ -339,6 +339,7 @@ stemAcerRubrum<-stemData_am$plot_shade |>
          Aspect=aspect,
          Slope=slope) |> 
   drop_na()
+
 pca=prcomp(stemAcerRubrum[,c("Temperature","Moisture deficit","CEC","Slope","Aspect")],scale=TRUE)
 pca_biot=prcomp(stemAcerRubrum[,c("Mean diameter","Min shade index")],scale=TRUE)
 
@@ -353,7 +354,7 @@ fviz_pca_var(pca,
   common_theme+
   theme(panel.grid = element_blank(),
         plot.title = element_text(hjust = -0.25,size=10))+
-  ylim(c(-0.1,1.1))+
+  ylim(c(-0.15,1.1))+
   labs(title = "A. PCA of MASTIF abiotic covariates")+
   coord_fixed(ratio=1) ->a
 
@@ -373,7 +374,7 @@ cbind(stemAcerRubrum,
         axis.title = element_blank(),
         plot.title = element_text(hjust = 0,size=10),
         panel.grid=element_blank(),
-        legend.position="none")+
+        legend.position=c(0.85,0.3))+
   # common_theme+
   labs(color="",title="B. PC1 of abiotic variables PCA")->b
 
@@ -392,7 +393,7 @@ fviz_pca_var(pca_biot,
   common_theme+
   theme(panel.grid = element_blank(),
         plot.title = element_text(hjust = -0.25,size=10))+
-  ylim(c(-0.1,1.1))+
+  ylim(c(-0.2,1.1))+
   labs(title = "A. PCA of MASTIF abiotic covariates")+
   coord_fixed(ratio=1) ->c
 
@@ -412,7 +413,7 @@ cbind(stemAcerRubrum,
         axis.title = element_blank(),
         plot.title = element_text(hjust = 0,size=10),
         panel.grid=element_blank(),
-        legend.position="none")+
+        legend.position=c(0.85,0.3))+
   # common_theme+
   labs(color="",title="B. PC1 of biotic variables PCA")->d
 
@@ -649,8 +650,20 @@ tar_read(fitspecies_25,store="target_fit_2") |>
 ### results
 
 ```{r}
-signif
+fitcontinentdiscrete |>
+  ungroup() |> 
+  group_by(margin.temp) |> 
+  summarise(mean=mean(posterior),
+            q05=quantile(posterior,prob=0.05),
+            q95=quantile(posterior,prob=0.95)) |> 
+  mutate(signif=(sign(q05)==sign(q95))) |> 
+  mutate(ltx=paste0(round(mean,digits = 2)," [",round(q05,digits=2),",",round(q95,digits = 2),"]"))
+signif |> 
+  mutate(ltx=paste0(round(mean,digits = 2)," [",round(q05,digits=2),",",round(q95,digits = 2),"]"))
+```
 
+
+```{r}
 fitspecies |>
   left_join(data_env) |> 
   filter(margin.temp%in%c("cold","hot"))|> # &margin.deficit=="arid" 
@@ -838,7 +851,8 @@ p2
 
 ### Results
 ```{r}
-signif
+signif |> 
+  mutate(ltx=paste0(round(mean,digits = 2)," [",round(q05,digits=2),",",round(q95,digits = 2),"]"))
 fecundity.fit |> filter(species%in% species_selection_large) |> select(biome,species) |> unique() |> group_by(biome) |> summarise(n=n()) 
 ```
 
@@ -848,6 +862,9 @@ fecundity.fit |> filter(species%in% species_selection_large) |> select(biome,spe
 ### data
 ```{r}
 fitbiomecontinuous<-tar_read(fitbiomecontinuous_25,store="target_fit_margin")
+fecundity.fit<-tar_read(fecundity.fit.25,store="target_fit_margin")
+species.biome<-tar_read(species.biome,store="target_fit_margin")
+fitbiomediscrete<-tar_read(fitbiomediscrete_25,store="target_fit_margin")
 ```
 
 ### Figure
@@ -894,7 +911,7 @@ fitbiomecontinuous |>
                          biome==8~"Temperate Grasslands",
                          biome==12~"Mediterranean",
                          biome==13~"Desert")) |> 
-  filter(margin.temp=="hot") |> 
+  filter(margin.temp%in%c("hot")) |> 
   filter(dh>(-4000)) |> 
   filter(abs(log(dISP)-mean)<7.5) |> 
   mutate(dh.cat=as.numeric(as.character(cut(dh,
@@ -946,8 +963,8 @@ fitbiomecontinuous |>
 slope_biome=data.frame(biome=c(4,5,6,12),slope_med=NA,slope_q05=NA,slope_q95=NA)
 for (b in 1:dim(slope_biome)[1]){
   fit<-loadRData(paste0("model/biome_continous_25_margin/anova_",slope_biome$biome[b],".RData"))
-  post_slope=as.data.frame(fit) |> select(c("beta[4]","beta[6]")) |>
-  mutate(slope=`beta[4]`+`beta[6]`) |> summarise(mean=mean(slope),q05=quantile(slope,probs = 0.05),q95=quantile(slope,probs = 0.95))
+  post_slope=as.data.frame(fit) |> select(c("beta[1]","beta[4]")) |>
+  mutate(slope=`beta[1]`+`beta[4]`) |> summarise(mean=mean(slope),q05=quantile(slope,probs = 0.05),q95=quantile(slope,probs = 0.95))
   slope_biome$slope_med[b]=post_slope$mean
   slope_biome$slope_q05[b]=post_slope$q05
   slope_biome$slope_q95[b]=post_slope$q95
@@ -955,8 +972,159 @@ for (b in 1:dim(slope_biome)[1]){
 }
 
 slope_biome$signif=(sign(slope_biome$slope_q05)==sign(slope_biome$slope_q95))
+slope_biome<-slope_biome |> 
+  mutate(biome=case_when(biome==4~"Temperate deciduous",
+                         biome==5~"Temperate coniferous",
+                         biome==6~"Boreal",
+                         biome==8~"Temperate Grasslands",
+                         biome==12~"Dry",
+                         biome==13~"Desert"),
+         slope=paste0("slope = ", format(slope_med,digits=2,scientific=TRUE)),
+         interv=paste0(format(slope_med,digits=2,scientific=TRUE)," [",
+                       format(slope_q05,digits=2,scientific=TRUE),", ",
+                       format(slope_q95,digits=2,scientific=TRUE),"]"))
+```
+
+### constant slope
+```{r}
+fec_biome<-data_fit |> 
+  filter(dh_valid) |> 
+  filter(!is.na(ISP)) |> 
+  filter(!is.na(dh)) |>
+  select(- biome) |> 
+  group_by(species) |>
+  mutate(mid_isp=median(ISP)[[1]]) |>
+  ungroup() |>
+  filter(!is.na(margin.temp)) |> 
+  left_join(species.biome) |> 
+  filter(biome!=8) |> 
+  mutate(dISP=ISP/mid_isp) |> 
+  filter(!is.na(dISP))
+  
+# output file
+out_anova_biome=fec_biome |> 
+  mutate(dh_sample=NA,
+         med=NA,
+         q05=NA,
+         q95=NA,
+         biome=NA) |> 
+  slice(0)
+  
+for(b in unique(fec_biome$biome)){
+  print(b)
+  sub_biome=fec_biome |> 
+    filter(biome==b) |> 
+    filter(!is.na(species)) |> 
+    ungroup()
+  
+  X=model.matrix(~margin.temp*dh, sub_biome)
+  model=paste0("anova_",b,".RData")
+  
+  if(file.exists(file.path(folder,model))){
+    load(file.path(folder,model))
+  }else{
+    stop()
+  }
+  posteriors_fec<-as.data.frame(fit) |>
+    dplyr::select(!matches("beta_")) |>
+    dplyr::select(matches("beta"))
+  colnames(posteriors_fec)[1:ncol(X)]=colnames(X)
+  dh_range=sub_biome |> pull(dh) |> quantile(probs=c(0.05,0.95))
+  out_anova_biome=rbind(out_anova_biome,
+                        posteriors_fec |> select(`(Intercept)`,dh) |> 
+                          crossing(dh_sample=seq(from=dh_range[1],
+                                                 to=dh_range[2],
+                                                 length.out=500)) |> 
+                          mutate(pred=`(Intercept)`+dh_sample*dh) |> 
+                          group_by(dh_sample) |> 
+                          summarise(med=median(pred),
+                                    q05=quantile(pred,probs = 0.05),
+                                    q95=quantile(pred,probs = 0.95)) |> 
+                          mutate(biome=b) )
+
+}
+out_anova_biome=out_anova_biome |>
+  mutate(biome=case_when(biome==4~"Temperate deciduous",
+                         biome==5~"Temperate coniferous",
+                         biome==6~"Boreal",
+                         biome==8~"Temperate Grasslands",
+                         biome==12~"Dry",
+                         biome==13~"Desert"))  
+  ggplot()+
+  geom_ribbon(aes(x=dh_sample,ymin=q05,ymax=q95),fill="grey")+
+  geom_line(aes(dh_sample,med,color=biome))+
+  scale_color_manual(values=c("turquoise3","tomato2","seagreen4","springgreen3"))+
+  facet_wrap(~biome,nrow=4,scales="free_y")
+
+fitbiomecontinuous |> 
+  mutate(biome=case_when(biome==4~"Temperate deciduous",
+                         biome==5~"Temperate coniferous",
+                         biome==6~"Boreal",
+                         biome==8~"Temperate Grasslands",
+                         biome==12~"Dry",
+                         biome==13~"Desert")) |> 
+  # filter(margin.temp%in%c("hot")) |> 
+  filter(abs(log(dISP)-mean)<7.5) |> 
+  group_by(biome) |> 
+  filter(dh>quantile(dh,probs=0.05),dh<quantile(dh,probs=0.95)) |> 
+  ungroup() |> 
+  mutate(dh.cat=as.numeric(as.character(cut(dh,
+                    breaks = c(-Inf,-100,-80,-60,-40,-20,0,20,40,60,80,100,Inf),
+                    labels =c(-110,-90,-70,-50,-30,-10,10,30,50,70,90,110))))) |> 
+  ggplot()+
+  geom_ribbon(data=out_anova_biome,aes(x=dh_sample,ymin=q05,ymax=q95),fill="grey")+
+  geom_line(data=out_anova_biome,aes(dh_sample,med,color=biome))+
+  geom_boxplot(aes(as.numeric(dh.cat),log(dISP)-mean,group=dh.cat,fill=biome),linewidth=0.3,outlier.colour = NA)+
+  geom_text(data=slope_biome,aes(label=slope),x=-75,y=-3.3,size=2.5)+
+  scale_fill_manual(values=c("turquoise3","tomato2","seagreen4","springgreen3"))+
+  scale_color_manual(values=c("turquoise3","tomato2","seagreen4","springgreen3"))+
+  common_theme+
+  theme(legend.position = "none")+
+  ylim(c(-4,4))+
+  labs(fill="Biome",
+       y="Log ratio of fecundity \n relative to the species mean",
+       x="Moisture deficit (mm)")+
+  facet_wrap(~biome,nrow = 4) -> a
+
+
+
+fec_biome |>  
+  group_by(biome,zone,species) |> 
+  summarise(cor_dh_mat=cor.test(dh,mat,method="spearman")$estimate[[1]],
+            pval_dh_mat=cor.test(dh,mat,method="spearman")$p.value,
+            cor_disp_dh=cor.test(dh,dISP,method="spearman")$estimate[[1]],
+            pval_disp_dh=cor.test(dh,dISP,method="spearman")$p.value) |>
+  mutate(cor_dh_mat=case_when(pval_dh_mat<0.05~cor_dh_mat,
+                              TRUE~0),
+         cor_disp_dh=case_when(pval_disp_dh<0.05~cor_disp_dh,
+                              TRUE~0)) |> 
+  mutate(biome=case_when(biome==4~"Temperate deciduous",
+                         biome==5~"Temperate coniferous",
+                         biome==6~"Boreal",
+                         biome==8~"Temperate Grasslands",
+                         biome==12~"Dry",
+                         biome==13~"Desert")) |> 
+  ggplot(aes(cor_dh_mat,fill=biome))+
+  geom_histogram()+
+  scale_fill_manual(values=c("turquoise3","tomato2","seagreen4","springgreen3"))+
+  geom_vline(xintercept = 0)+
+  common_theme+
+  theme(legend.position = "none")+
+  scale_x_continuous(breaks=c(-0.4,-0.2,0,0.2,0.4,0.6))+
+  facet_wrap(~biome,nrow=4)+
+  labs(x="Correlation between temperature and moisture deficit",y="Count (species)")->b
+
+cowplot::plot_grid(a,b)->p3
+ggsave( p3,
+        filename = "figure/main_fig_3_margin.png",
+        scale=1.1,
+        dpi = 600,
+        width = 17,
+        height=15,
+        units = "cm")
 
 ```
+
 
 
 ## complementary analysis
@@ -1010,7 +1178,7 @@ data_aridity |>
   geom_text(data=text,aes(label=text,x=x,y=y,color=type))+
   geom_text(data=text,aes(label=text2,x=x,y=y,color=type),vjust=2)+
   stat_ellipse(aes(cor_dh_mat,cor_disp_dh,color=as.factor(biome)),
-               geom="polygon",level=0.8,alpha=0.2)+
+               geom="polygon",level=0.85,alpha=0.2)+
   scale_color_manual(values=c("turquoise3","tomato2","seagreen4","springgreen3","blue","red"))+
   common_theme+
   labs(color="Biome",
@@ -1204,7 +1372,7 @@ p
 
 ### Data
 ```{r}
-fitbiomediscrete<-tar_read(fitbiomediscrete_25,store="target_fit")
+fitbiomediscrete<-tar_read(fitbiomediscrete_25,store="target_fit_margin")
 ```
 
 
