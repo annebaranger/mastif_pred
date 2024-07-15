@@ -1471,7 +1471,7 @@ ggsave( p3,
 tar_load(stemData_am,store="target_nfi")
 tar_load(stemData_eu,store="target_nfi")
 tar_load(species.biome,store="target_fit")
-tar_load(species_selection_narrow,store="target_nfi")
+tar_load(phylo.select_margin,store="target_nfi")
 ```
 
 ### Figure
@@ -1502,10 +1502,47 @@ rbind(stemData_am$plot_shade,stemData_eu$plot_shade) |>
                          biome==12~"Mediterranean",
                          biome==13~"Desert")) |> 
   filter(margin.temp%in% c("cold","hot"),margin.deficit %in% c("humid","arid")) |> 
-  ggplot(aes(margin.deficit,shade_mean))+
+  ggplot(aes(margin.deficit,shade_min))+
   # geom_point(alpha=0.1)+
   # geom_smooth(method="lm")+
   geom_boxplot(outlier.colour = NA)+
   facet_grid(~biome)
+
+
+rbind(stemData_am$plot_shade,stemData_eu$plot_shade) |> 
+  filter(species %in% species_selection_narrow) |> 
+  group_by(species) |> 
+    # compute weighted quantiles of sgdd and wai, and correlation between wai and sgdd
+    mutate(margin.temp=case_when(mat<=quantile(mat, probs=thresh,na.rm=TRUE)[[1]]~"cold",
+                                 mat<quantile(mat, probs=0.5+thresh/2,na.rm=TRUE)[[1]]&
+                                   mat>quantile(mat, probs=0.5-thresh/2,na.rm=TRUE)[[1]]~"midtemp",
+                                 mat>=quantile(mat,probs=1-thresh,na.rm=TRUE)[[1]]~"hot"),
+           margin.temp=factor(margin.temp,levels=c("midtemp","cold","hot")),
+           margin.deficit=case_when(dh<quantile(dh,probs=thresh,na.rm=TRUE)[[1]]~"humid",
+                                    dh<quantile(dh,probs=0.5+thresh/2,na.rm=TRUE)[[1]]&
+                                      dh>quantile(dh,probs=0.5-thresh/2,na.rm=TRUE)[[1]]~"midhum",
+                                    dh>quantile(dh,probs=1-thresh,na.rm=TRUE)[[1]]~"arid"),
+           margin.deficit=factor(margin.deficit,levels=c("midhum","humid","arid"))) |> 
+  ungroup() |> 
+  left_join(species.biome,by="species") |> 
+  filter(biome!=8) |> 
+    mutate(biome=case_when(biome==4~"Temperate deciduous",
+                         biome==5~"Temperate coniferous",
+                         biome==6~"Boreal",
+                         biome==8~"Temperate Grasslands",
+                         biome==12~"Dry",
+                         biome==13~"Desert")) |> 
+  # filter(margin.deficit %in% c("humid","arid")) |>
+  filter(margin.temp %in% c("hot","cold")) |>
+  # group_by(biome,margin.temp) |> mutate(n_plot=n()) |> 
+  # group_by(biome,margin.temp,shade_min) |> summarise(n_shade=100*n()/n_plot) |> distinct() |> 
+  # ggplot(aes(shade_min,n_shade,fill=margin.temp))+
+  # geom_col(position="dodge")+
+  # facet_grid(~biome)
+  ggplot()+
+  geom_histogram(aes(shade_min,fill=margin.temp),stat="count",position="dodge")+
+  facet_wrap(~biome,scales="free_y")
+
+
 ```
 

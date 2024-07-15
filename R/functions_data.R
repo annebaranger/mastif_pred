@@ -1143,6 +1143,7 @@ get_stemdata<-function(fecundity_data,
     group_by(plot,species) |> 
     summarise(shade_mean=mean(shade,na.rm=TRUE)[[1]],
               shade_min=min(shade,na.rm=TRUE)[[1]],
+              shade_max=max(shade,na.rm=TRUE)[[1]],
               mean_dbh=mean(diam,na.rm=TRUE)) |> 
     ungroup() |> 
     rename(plot.new=plot) |> 
