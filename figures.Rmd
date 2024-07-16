@@ -38,6 +38,40 @@ loadRData <- function(fileName){
 
 # Introduction
 
+```{r}
+author_list<-read.csv("authors.csv")
+author_first<-author_list |> 
+  filter(id_authors%in%c("Michal_Bogdziewicz","James_Clark","Tong_Qiu","Georges_Kunstler","Benoit_Courbaud")) |> 
+  mutate(order=case_when(id_authors=="James_Clark"~2,
+                         id_authors=="Michal_Bogdziewicz"~3,
+                         id_authors=="Tong_Qiu"~4,
+                         id_authors=="Georges_Kunstler"~dim(author_list)[1]+1))
+
+author_ordered<-author_list |> 
+  filter(!id_authors%in%author_first$id_authors) |> 
+  arrange(last) |> 
+  mutate(order=row_number()+4) |> 
+  rbind(author_first)
+
+institution<-author_ordered |> 
+  select(address,order) |> 
+  group_by(address) |> summarise(order=min(order)) |> arrange(order) |> 
+  mutate(order_instit=row_number()+1) |> select(-order)
+
+institution |> 
+  mutate(institution_name=paste0("$^{",order_instit,"}$ ",address,"\\")) |> 
+  pull(institution_name) |> 
+  paste(collapse = "%x%")
+author_ordered |> 
+  left_join(institution,by="address") |> 
+  mutate(author_name=paste0(last," ",str_sub(first,1,1),".$^{",order_instit,"}$")) |> 
+  arrange(order) |> 
+  pull(author_name)->latex_author
+
+paste(latex_author,collapse = ", ")
+```
+
+
 # Material & method
 
 ## Figure method maps
@@ -1210,13 +1244,13 @@ fecundity.fit |>
 
 ### data
 ```{r}
-fecundity.fit<-tar_read(fecundity.fit.25,store="target_fit")
+fecundity.fit<-tar_read(fecundity.fit.25,store="target_fit_margin")
 tar_load(species_selection_large,store="target_nfi")
 tar_load(species_selection_narrow,store="target_nfi")
 mastif_data<-rbind(tar_read(mastif.eu,store="target_data")$df.tree,
                    tar_read(mastif.am,store="target_data")$df.tree)
-phylo.select=tar_read(phylo.select,store="target_nfi") #|>
-tar_load(species.biome,store="target_fit")
+phylo.select=tar_read(phylo.select_margin,store="target_nfi") #|>
+tar_load(species.biome,store="target_fit_margin")
 ```
 
 ### table
@@ -1224,16 +1258,21 @@ tar_load(species.biome,store="target_fit")
 ```{r}
 mastif_treeyear<-mastif_data |> group_by(species) |> summarise(ntreeyear=n())
 nfi_nplots<-fecundity.fit |> group_by(species) |> summarise(nplot=n())
-species_biome
+
 phylo.select |> 
   left_join(species.biome) |> 
   left_join(mastif_treeyear) |> 
   left_join(nfi_nplots) |> 
-  select(species_l,species,taxa,zone,biome,ntreeyear,nplot) |> 
-  mutate(`Biogeographical zone`=case_when(zone %in% c("west","east")~paste0("North-",zone," America"),
+  mutate(Margin=case_when(cold_valid&hot_valid~"Both",
+                          cold_valid&!hot_valid~"Cold",
+                          !cold_valid&hot_valid~"Hot")) |> 
+  select(species_l,species,taxa,zone,biome,Margin,ntreeyear,nplot) |> 
+  mutate(`Biogeographical zone`=case_when(zone %in% c("west","east")~paste0("N.-",
+                                                                            toupper(str_sub(zone,1,1)),
+                                                                            " Am."),
                                           TRUE~"Europe"),
-         biome=case_when(biome==4~"Temperate deciduous",
-                         biome==5~"Temperate coniferous",
+         biome=case_when(biome==4~"Temp. dec.",
+                         biome==5~"Temp. con.",
                          biome==6~"Boreal",
                          biome==8~"Temperate Grasslands",
                          biome==12~"Dry",
@@ -1245,8 +1284,12 @@ phylo.select |>
          Biome=biome,
          `Tree year (MASTIF)`=ntreeyear,
          `NFI plots`=nplot) |> 
-  select(Species,Taxa,`Biogeographical zone`,Biome,`Tree year (MASTIF)`,`NFI plots`,`Large selection`,`Narrow selection`) |> 
-  arrange(Species)-> table
+  select(Species,Taxa,`Biogeographical zone`,Biome,Margin,`Tree year (MASTIF)`,`NFI plots`,`Large selection`,`Narrow selection`) |> 
+  group_by(Species,Taxa,`Biogeographical zone`,Margin,`Tree year (MASTIF)`,`NFI plots`,`Large selection`,`Narrow selection`) %>%
+  summarise(Biome = paste(unique(Biome), collapse = ",\\")) |> 
+  mutate(Biome=paste0("makecell{",Biome,"}")) |> 
+  arrange(Species) |> 
+  select(Species,Taxa,`Biogeographical zone`,Biome,Margin,`Tree year (MASTIF)`,`NFI plots`,`Large selection`,`Narrow selection`)-> table
 print(xtable::xtable(table),include.rownames=FALSE)
 ```
 
@@ -1509,20 +1552,13 @@ rbind(stemData_am$plot_shade,stemData_eu$plot_shade) |>
   facet_grid(~biome)
 
 
-rbind(stemData_am$plot_shade,stemData_eu$plot_shade) |> 
+data_processed=rbind(stemData_am$plot_shade,stemData_eu$plot_shade) |> 
   filter(species %in% species_selection_narrow) |> 
   group_by(species) |> 
-    # compute weighted quantiles of sgdd and wai, and correlation between wai and sgdd
-    mutate(margin.temp=case_when(mat<=quantile(mat, probs=thresh,na.rm=TRUE)[[1]]~"cold",
-                                 mat<quantile(mat, probs=0.5+thresh/2,na.rm=TRUE)[[1]]&
-                                   mat>quantile(mat, probs=0.5-thresh/2,na.rm=TRUE)[[1]]~"midtemp",
-                                 mat>=quantile(mat,probs=1-thresh,na.rm=TRUE)[[1]]~"hot"),
-           margin.temp=factor(margin.temp,levels=c("midtemp","cold","hot")),
-           margin.deficit=case_when(dh<quantile(dh,probs=thresh,na.rm=TRUE)[[1]]~"humid",
-                                    dh<quantile(dh,probs=0.5+thresh/2,na.rm=TRUE)[[1]]&
-                                      dh>quantile(dh,probs=0.5-thresh/2,na.rm=TRUE)[[1]]~"midhum",
-                                    dh>quantile(dh,probs=1-thresh,na.rm=TRUE)[[1]]~"arid"),
-           margin.deficit=factor(margin.deficit,levels=c("midhum","humid","arid"))) |> 
+    mutate(margin.temp=case_when(dh<=quantile(dh, probs=thresh,na.rm=TRUE)[[1]]~"humid",
+                                 dh<quantile(dh, probs=0.5+thresh/2,na.rm=TRUE)[[1]]&
+                                   dh>quantile(dh, probs=0.5-thresh/2,na.rm=TRUE)[[1]]~"midtemp",
+                                 dh>=quantile(dh,probs=1-thresh,na.rm=TRUE)[[1]]~"arid")) |> 
   ungroup() |> 
   left_join(species.biome,by="species") |> 
   filter(biome!=8) |> 
@@ -1533,16 +1569,50 @@ rbind(stemData_am$plot_shade,stemData_eu$plot_shade) |>
                          biome==12~"Dry",
                          biome==13~"Desert")) |> 
   # filter(margin.deficit %in% c("humid","arid")) |>
-  filter(margin.temp %in% c("hot","cold")) |>
-  # group_by(biome,margin.temp) |> mutate(n_plot=n()) |> 
-  # group_by(biome,margin.temp,shade_min) |> summarise(n_shade=100*n()/n_plot) |> distinct() |> 
-  # ggplot(aes(shade_min,n_shade,fill=margin.temp))+
-  # geom_col(position="dodge")+
-  # facet_grid(~biome)
-  ggplot()+
-  geom_histogram(aes(shade_min,fill=margin.temp),stat="count",position="dodge")+
-  facet_wrap(~biome,scales="free_y")
+  filter(margin.temp %in% c("humid","arid")) 
+coord<- data_processed %>%
+  group_by(biome,margin.temp) |> mutate(n_biome=n()) |> 
+  group_by(biome,margin.temp,shade_min) |> summarise(prop=n()/n_biome) |> distinct() |> 
+  group_by(biome,shade_min) |> summarise(y=max(prop)+0.05)
 
+prop_test_results <- data_processed %>%
+  count(biome, shade_min, margin.temp) %>%
+  group_by(biome, shade_min) %>%
+  summarize(n_hot = sum(n[margin.temp == "humid"], na.rm = TRUE),
+            n_cold = sum(n[margin.temp == "arid"], na.rm = TRUE)) %>%
+  rowwise() %>%
+  mutate(p_value = prop.test(c(n_hot, n_cold), c(sum(n_hot, n_cold), sum(n_hot, n_cold)))$p.value,
+         signif=if_else(p_value<0.01,"***",
+                        if_else(p_value<0.05,"**",
+                                if_else(p_value<0.1,"*","")))) |> 
+  left_join(coord) |> 
+  filter(shade_min!=0)
+
+
+
+
+ggplot(data=data_processed)+
+  geom_bar(aes(shade_min,fill=margin.temp,y=..prop..),stat="count",position="dodge")+
+  geom_text(data=prop_test_results,aes(label=signif,x=shade_min,y=y))+
+  # stat_compare_means(aes(group = margin.temp,y=1000), method = "t.test", label = "p.signif",)+
+  facet_wrap(~biome) +
+  labs(x = "Shade Minimum", y = "Proportion", fill = "Temperature region") +
+  theme_minimal() +
+  scale_fill_manual(values=c("steelblue","orange"))+
+  theme(panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(), 
+        strip.background = element_blank(), 
+        strip.text = element_text(face = "bold"),
+        legend.position = "top") ->p
+
+p
+# ggsave( p,
+#         filename = "figure/supmat_fig_4.png",
+#         scale=1.2,
+#         dpi = 600,
+#         width = 12,
+#         height=9,
+#         units = "cm")
 
 ```
 
