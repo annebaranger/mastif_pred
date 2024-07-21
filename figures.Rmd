@@ -158,10 +158,10 @@ selection_ex<-mastif.species.niche |>
   filter(grepl("q",limit)) |> 
   select(!matches("range")) |> 
   rename(Mastif=value_mastif,
-         NFI=value_nfi) |> 
+         `NFI/GBIF`=value_nfi) |> 
   mutate(clim=case_when(clim=="dh"~"Moist. def.",
                         clim=="mat"~"MAT")) |> 
-  pivot_longer(cols=c("Mastif","NFI")) |> 
+  pivot_longer(cols=c("Mastif","NFI/GBIF")) |> 
   pivot_wider(names_from = limit,values_from = value) |> 
   ggplot()+
   geom_linerange(aes(xmin=qlow,xmax=qhigh,color=name,y=clim),
