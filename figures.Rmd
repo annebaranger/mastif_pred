@@ -90,7 +90,7 @@ mastif_map<-rbind(tar_read(mastif.am,store="target_data")$df.tree,
         axis.text = element_blank(),
         axis.ticks = element_blank(),
         axis.title = element_blank())+
-  ylim(c(25,70))+xlim(c(-130,35))
+  ylim(c(25,70))+xlim(c(-145,35))
   
 
 mastif.species.niche<-rbind(tar_read(mastif.am,store="target_data")$df.tree, 
@@ -190,7 +190,8 @@ nfi_map<-rbind(tar_read(fecundity.eu_clim,store="target_nfi"),
         axis.text = element_blank(),
         axis.ticks = element_blank(),
         axis.title = element_blank())+
-  ylim(c(25,70))+xlim(c(-130,35))
+  scale_fill_gradient(low="lightblue",high="darkblue",breaks=c(0,500,1500,3000))+
+  ylim(c(25,70))+xlim(c(-145,35))
 
 fec_map<-tar_read(fecundity.fit.25,store="target_fit_margin") |> 
   filter(species=="fagusGrandifo") |> 
