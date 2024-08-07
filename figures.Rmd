@@ -805,6 +805,7 @@ summary(lme_mod_rand)
 ### Data
 ```{r}
 fitbiomediscrete<-tar_read(fitbiomediscrete_25,store="target_fit_margin")
+fecundity.fit<-tar_read(fecundity.fit.25,store="target_fit_margin")
 tar_load(species.biome,store="target_fit_margin")
 ```
 
@@ -857,26 +858,26 @@ fitbiomediscrete |>
   filter(margin.temp!="midtemp") |>
   ggplot()+
   geom_density_ridges(aes(x=posterior,y=biome,fill=biome),
-                      scale=0.8,color=NA)+
+                      scale=1.1,color=NA)+
   geom_text(data=text,aes(label=star,x=med,y=biome,color=biome),vjust=1.2,size=6)+
-  geom_text(data=text,aes(label=n,x=med,y=biome),vjust=-0.5,size=2)+
+  geom_text(data=text,aes(label=n,x=med,y=biome),vjust=-0.5,size=3)+
   geom_vline(xintercept = 0)+
   scale_fill_manual(values=c("turquoise3","tomato2","seagreen4","springgreen2"))+
   scale_color_manual(values=c("turquoise3","tomato2","seagreen4","springgreen2"),guide="none")+
   facet_wrap(~margin.temp,ncol=2)+
   common_theme+
-  theme(axis.text.y=element_blank(),
+  theme(#axis.text.y=element_blank(),
         axis.title.y=element_blank(),
-        legend.position = "right",
-        legend.background = element_rect(fill = "white",
-                                         size = 1),
+        legend.position = "none",
+        # legend.background = element_rect(fill = "white",
+        #                                  size = 1),
         panel.grid.major.x = element_blank(),
         panel.grid.minor.x = element_blank())+
   labs(x="Posterior of the relative log-fecundity",
        fill="Biome")->p2
 p2
 # ggsave( p2,
-#         filename = "figure/main_fig_2_margin.png",
+#         filename = "figure/main_fig_2_margin_2.png",
 #         scale=1.1,
 #         dpi = 600,
 #         width = 15,
