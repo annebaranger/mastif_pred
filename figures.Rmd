@@ -79,18 +79,29 @@ paste(latex_author,collapse = ", ")
 ```{r}
 worldmap <- sf::st_as_sf(getMap(resolution = "high"))
 
-mastif_map<-rbind(tar_read(mastif.am,store="target_data")$df.tree, 
+mastif_species <-rbind(tar_read(mastif.am,store="target_data")$df.tree, 
                   tar_read(mastif.eu,store="target_data")$df.tree) |> 
   select(plotID,lon,lat,species) |> 
-  distinct() |> 
-  ggplot()+
-  geom_jitter(aes(lon,lat,color=species),width = 0.01,height = 0.01)+
+  filter(species %in%c("fagusGrandifo","abiesProcera")) |> 
+  mutate(species=case_when(species=="fagusGrandifo"~"Fagus grandifolia",
+                           species=="abiesProcera"~"Abies procera")) |> 
+  distinct()
+mastif_all<-rbind(tar_read(mastif.am,store="target_data")$df.tree, 
+                  tar_read(mastif.eu,store="target_data")$df.tree) |> 
+  select(plotID,lon,lat,species) |> 
+  filter(!species %in%c("fagusGrandifo","abiesProcera")) |> 
+  distinct()
+mastif_map<-ggplot()+
+  geom_jitter(data=mastif_all,aes(lon,lat),fill="grey60",color="grey60",width = 0.01,height = 0.01,alpha=0.4)+
+  geom_jitter(data=mastif_species,aes(lon,lat,color=species),size=2,width = 0.01,height = 0.01)+
   geom_sf(data=worldmap,fill=NA)+
-  theme(legend.position = "none",
+  scale_color_manual(values=c("lightcoral","lightgreen"))+
+  theme(legend.position = "bottom",
         axis.text = element_blank(),
         axis.ticks = element_blank(),
         axis.title = element_blank())+
-  ylim(c(25,70))+xlim(c(-145,35))
+  ylim(c(25,70))+xlim(c(-145,35))+
+  labs(color="")
   
 
 mastif.species.niche<-rbind(tar_read(mastif.am,store="target_data")$df.tree, 
@@ -178,20 +189,28 @@ selection_ex<-mastif.species.niche |>
 
 
 ```{r}
-nfi_map<-rbind(tar_read(fecundity.eu_clim,store="target_nfi"),
+nfi_all<-rbind(tar_read(fecundity.eu_clim,store="target_nfi"),
                tar_read(fecundity.am_clim,store="target_nfi")) |> 
   select(plot,lon,lat,species) |> 
-  distinct() |> 
-  ggplot()+
-  geom_hex(aes(lon,lat),bins=100)+
+  filter(species!="fagusGrandifo") |>
+  distinct() 
+nfi_species<-rbind(tar_read(fecundity.eu_clim,store="target_nfi"),
+                   tar_read(fecundity.am_clim,store="target_nfi")) |> 
+  select(plot,lon,lat,species) |> 
+  filter(species=="fagusGrandifo") |> 
+  distinct() 
+
+nfi_map<-ggplot()+
+  geom_hex(data=nfi_all,aes(lon,lat),bins=100)+
+  geom_point(data=nfi_species,aes(lon,lat),color="lightgreen",size=0.2,bins=100)+
   geom_sf(data=worldmap,fill=NA)+
-  theme(legend.position = c(0.5,0.1),
-        legend.direction = "horizontal",
+  theme(legend.position ="bottom",# c(0.5,0.1),
+        # legend.direction = "horizontal",
         axis.text = element_blank(),
         axis.ticks = element_blank(),
         axis.title = element_blank())+
-  scale_fill_gradient(low="lightblue",high="darkblue",breaks=c(0,500,1500,3000))+
-  ylim(c(25,70))+xlim(c(-145,35))
+  scale_fill_gradient(low="lightgrey",high="grey20",breaks=c(0,500,1500,3000))+
+  ylim(c(25,70))+xlim(c(-145,35))+labs(fill="NFI plots count")
 
 fec_map<-tar_read(fecundity.fit.25,store="target_fit_margin") |> 
   filter(species=="fagusGrandifo") |> 
@@ -200,11 +219,11 @@ fec_map<-tar_read(fecundity.fit.25,store="target_fit_margin") |>
   ggplot()+
   geom_point(aes(lon,lat,color=fecGmMu))+
   geom_sf(data=worldmap,fill=NA)+
-  theme(legend.position=c(0.8,0.3),
+  theme(legend.position="bottom",#c(0.8,0.3),
         axis.text = element_blank(),
         axis.ticks = element_blank(),
         axis.title = element_blank())+
-  scale_color_gradientn(colours=viridis(n=15),trans="log",breaks=c(0,5,100,1000,10000))+
+  scale_color_gradientn(colours=viridis(n=15),trans="log",breaks=c(0,1,100,10000))+
   ylim(c(25,50))+xlim(c(-100,-60))+
   labs(color="Fecundity (g)")
 
@@ -218,7 +237,7 @@ margin_map<-tar_read(fecundity.fit.25,store="target_fit_margin") |>
   ggplot()+
   geom_point(aes(lon,lat,color=margin.temp))+
   geom_sf(data=worldmap,fill=NA)+
-  theme(legend.position=c(0.8,0.3),
+  theme(legend.position="bottom",#c(0.8,0.3),
         axis.text = element_blank(),
         axis.ticks = element_blank(),
         axis.title = element_blank())+
