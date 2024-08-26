@@ -373,6 +373,8 @@ plot3 <-cowplot::plot_grid(plot2,plot.var, nrow = 2,rel_heights =  c(1,0.5))
 
 ## Figure focus on one species
 
+### Fagus grandifolia
+
 ```{r}
 ecoregions=sf::read_sf(dsn="data/WWF/official", #read ecoregions
                          layer="wwf_terr_ecos") |>
@@ -504,7 +506,159 @@ fec_map<-stemAcerRubrum |>
   # common_theme+
   labs(color="",title="B. Mean Fecundity")->b
 
-plot_grid(a,b,c,d,
+cowplot::plot_grid(a,b,c,d,
+          scales=c(1,0.9,0.9,0.9),
+          # labels_x=c(10,40,0),
+          # labels_y=-10,
+          ncol=2,
+          label_fontfamily="plain")->plot
+plot
+```
+
+### Fagus sylvatica
+
+```{r}
+ecoregions=sf::read_sf(dsn="data/WWF/official", #read ecoregions
+                         layer="wwf_terr_ecos") |>
+    select(BIOME,ECO_NAME,geometry) |> 
+    filter(!BIOME%in%c(98,99)) |> 
+    mutate(ECO_NUM=as.numeric(as.factor(ECO_NAME)))
+tar_load(mastif.am,store="target_data")
+tar_load(stemData_eu,store="target_nfi")
+
+stemAcerRubrum<-stemData_eu$plot_shade |> 
+  filter(species=="fagusSylvatic") |> 
+  select(plot,lat,lon,mean_dbh,shade_min,dh,mat,cec30,slope,aspect,ISP,SIZE) |> 
+  rename(Temperature=mat,
+         `Moisture deficit`=dh,
+         `Mean diameter`=mean_dbh,
+         `Min shade index`=shade_min,
+         CEC=cec30,
+         Aspect=aspect,
+         Slope=slope) |> 
+  drop_na()
+
+pca=prcomp(stemAcerRubrum[,c("Temperature","Moisture deficit","CEC","Slope","Aspect")],scale=TRUE)
+pca_biot=prcomp(stemAcerRubrum[,c("Mean diameter","Min shade index")],scale=TRUE)
+
+fviz_pca_var(pca,
+           axes=c(1,2),
+           geom.var=c("arrow","text"),
+           col.var="black",
+           col.ind=NA,
+           alpha.ind=0.05,
+           col.circle = NA
+           ) +
+  common_theme+
+  theme(panel.grid = element_blank(),
+        plot.title = element_text(hjust = -0.25,size=10))+
+  ylim(c(-0.15,1.1))+
+  labs(title = "A. PCA of MASTIF abiotic covariates")+
+  coord_fixed(ratio=1) ->a
+
+cbind(stemAcerRubrum,
+      predict(pca,stemAcerRubrum)) |>
+  filter(PC1>quantile(PC1,probs=0.05),
+         PC1<quantile(PC1,probs=0.95)) |> 
+  rename(`B. PCA axis 1`=PC1) |> 
+  ggplot() +
+  geom_sf(data=ecoregions,fill="#e9ecef")+
+  geom_point(aes(x = lon, y = lat, color = `B. PCA axis 1`),
+             size=0.2,
+             alpha = 0.4) +
+  scale_color_gradientn(colours = wes_palette(type="continuous",name="Zissou1")) +
+  ylim(c(35, 60)) + xlim(c(-8, 27))+
+  theme(axis.text = element_blank(),
+        axis.title = element_blank(),
+        plot.title = element_text(hjust = 0,size=10),
+        panel.grid=element_blank(),
+        legend.position=c(0.85,0.25),
+        legend.title=element_blank(),
+        legend.background = element_rect(fill="#e9ecef", 
+                                  size=0.5,
+                                  linetype="solid",
+                                  color="#e9ecef"))->b
+  # common_theme+
+  # labs(title="B. PC1 of abiotic variables PCA")->b
+
+
+cowplot::plot_grid(a,b,nrow=2,rel_widths = c(0.92,1))-> p1
+
+
+fviz_pca_var(pca_biot,
+           axes=c(1,2),
+           geom.var=c("arrow","text"),
+           col.var="black",
+           col.ind=NA,
+           alpha.ind=0.05,
+           col.circle = NA
+           ) +
+  common_theme+
+  theme(panel.grid = element_blank(),
+        plot.title = element_text(hjust = -0.25,size=10))+
+  ylim(c(-0.2,1.1))+
+  labs(title = "A. PCA of MASTIF abiotic covariates")+
+  coord_fixed(ratio=1) ->c
+
+cbind(stemAcerRubrum,
+      predict(pca_biot,stemAcerRubrum)) |>
+  filter(PC1>quantile(PC1,probs=0.05),
+         PC1<quantile(PC1,probs=0.95)) |> 
+  rename(`B. PCA axis 1`=PC1) |> 
+  ggplot() +
+  geom_sf(data=ecoregions,fill="#e9ecef")+
+  geom_point(aes(x = lon, y = lat, color = `B. PCA axis 1`),
+             size=0.2,
+             alpha = 0.4) +
+  scale_color_gradientn(colours = wes_palette(type="continuous",name="Zissou1")) +
+  ylim(c(35, 60)) + xlim(c(-8, 27))+
+  theme(axis.text = element_blank(),
+        axis.title = element_blank(),
+        plot.title = element_text(hjust = 0,size=10),
+        panel.grid=element_blank(),
+        legend.position=c(0.85,0.25),
+        legend.title = element_blank(),
+        legend.background = element_rect(fill="#e9ecef", 
+                                  size=0.5,
+                                  linetype="solid",
+                                  color="#e9ecef"))+
+  # common_theme+
+  labs(title="B. PC1 of biotic variables PCA")->d
+
+
+cowplot::plot_grid(c,d,nrow=2,rel_widths = c(0.92,1))-> p2
+
+mastif.point=mastif.am$df.alltree |>
+  filter(species=="acerRubrum") |> 
+  select(plotID,species,lon,lat) |> 
+  unique()
+
+fec_map<-stemAcerRubrum |> 
+  mutate(lISP = scale(log(ISP / mean(ISP)))) %>%
+    filter(lISP>quantile(lISP,probs=0.05),
+           lISP<quantile(lISP,probs=0.95)) |> 
+  rename(`B. Mean Fecundity`=lISP) |> 
+  ggplot() +
+  geom_sf(data=ecoregions,fill="#e9ecef")+
+  geom_point(aes(x = lon, y = lat, color = `B. Mean Fecundity`),
+             size=0.2,
+             alpha = 0.4) +
+  geom_point(data=mastif.point,
+             aes(x=lon,y=lat),
+             size=0.8,
+             alpha=1,
+             color="grey10") +
+  scale_color_gradientn(colours = wes_palette(type="continuous",name="Zissou1")) +
+  ylim(c(25, 50)) + xlim(c(-100, -65))+
+  theme(axis.text = element_blank(),
+        axis.title = element_blank(),
+        plot.title = element_text(hjust = 0,size=10),
+        panel.grid=element_blank(),
+        legend.position="none")+
+  # common_theme+
+  labs(color="",title="B. Mean Fecundity")->b
+
+cowplot::plot_grid(a,b,c,d,
           scales=c(1,0.9,0.9,0.9),
           # labels_x=c(10,40,0),
           # labels_y=-10,
