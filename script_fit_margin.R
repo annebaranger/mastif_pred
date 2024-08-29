@@ -127,6 +127,12 @@ list(
                          folder="model/biome_continous_25_margin")
   ),
   tar_target(
+    fitbiomediscrete_dh_25,
+    fit.biome.discrete.dh(subset(fecundity.fit.25,dh_valid),
+                         species.biome,
+                         folder="model/biome_continous_dh_25_margin")
+  ),
+  tar_target(
     fitbiomediscrete_25,
     fit.biome.discrete(fecundity.fit.25,
                        species.biome,

@@ -647,6 +647,91 @@ fit.biome.discrete<-function(data_fit,
 }
 
 
+fit.biome.discrete.dh<-function(data_fit,
+                                species.biome,
+                                folder){
+  if(!dir.exists(folder)) dir.create(folder)
+  fec_biome<-data_fit |> 
+    filter(!is.na(ISP)) |> 
+    filter(!is.na(dh)) |>
+    select(- biome) |> 
+    group_by(species) |>
+    mutate(mid_isp=median(ISP)[[1]]) |>
+    ungroup() |>
+    # filter(!is.na(margin.temp)) |> 
+    filter(!is.na(margin.deficit)) |>
+    left_join(species.biome) |> 
+    filter(biome!=8) |> 
+    mutate(dISP=ISP/mid_isp) |> 
+    filter(!is.na(dISP))
+  
+  # output file
+  out_anova_biome<- setNames(data.frame(matrix(ncol = 3, nrow = 0)),
+                             c("biome", "posterior", "margin.deficit"))
+  
+  for(b in unique(fec_biome$biome)){
+    print(b)
+    sub_biome=fec_biome |> 
+      filter(biome==b) |> 
+      filter(!is.na(species)) |> 
+      ungroup()
+    
+    X=model.matrix(~margin.deficit, sub_biome)
+    model=paste0("anova_",b,".RData")
+    if(file.exists(file.path(folder,model))){
+      load(file.path(folder,model))
+    }else{
+      data_biome=list(N=dim(sub_biome)[1],
+                      NX=ncol(X),
+                      S=nlevels(as.factor(sub_biome$species)),
+                      species=as.numeric(as.factor(sub_biome$species)),
+                      ISP=sub_biome$dISP,
+                      X=X,
+                      NULL)
+      fit <- stan(file = "stan/lmm_dif.stan",
+                  data=data_biome,
+                  iter=1000,
+                  chains=3,
+                  core=3,
+                  include=FALSE,
+                  pars=c("beta_raw"))
+      save(fit,file=file.path(folder,model))    
+    }
+    posteriors_fec<-as.data.frame(fit) |>
+      dplyr::select(!matches("beta_")) |>
+      dplyr::select(matches("beta"))
+    posteriors_fec<-posteriors_fec[,1:3]
+    colnames(posteriors_fec)[1:ncol(X)]=colnames(X)
+    
+    contrast_mat= X |>  unique() |>  t()
+    contrast_post=as.matrix(posteriors_fec)[,1:ncol(X)] %*% contrast_mat
+    
+    contrast_cor=as.data.frame(X) |> 
+      unique() |>
+      mutate(margin.deficit=case_when(margin.deficithumid==1~"humid",
+                                   margin.deficitarid==1~"arid",
+                                   TRUE~"mid")) |> 
+      mutate(margin.deficit=factor(margin.deficit,levels=c("humid","mid","arid"))) |> 
+      tibble::rownames_to_column(var = "code") |> 
+      dplyr::select(code,margin.deficit) 
+    
+    post_distrib=as.data.frame(contrast_post) |> 
+      pivot_longer(cols=everything(),
+                   names_to = "code",
+                   values_to = "posterior") |>
+      left_join(contrast_cor,by="code") |> 
+      select(-code) |> 
+      mutate(biome=b)
+    
+    out_anova_biome=rbind(out_anova_biome,
+                          post_distrib)
+    
+    }
+  
+  return(out_anova_biome)
+}
+
+
 
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 # -- 4. Fit species models ----
