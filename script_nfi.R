@@ -8,7 +8,8 @@ library(targets)
 #Options
 source("R/functions_data.R")
 options(tidyverse.quiet = TRUE)
-tar_option_set(packages = c("rworldmap","stringr","ggplot2","tidyr","dplyr","terra","factoextra","modi","tibble","mastif"),
+tar_option_set(packages = c("rworldmap","stringr","ggplot2","tidyr","dplyr","terra",
+                            "factoextra","modi","tibble","mastif"),
                error = "continue") 
 
 mastif.eu=tar_read(mastif.eu,store = "target_data")
