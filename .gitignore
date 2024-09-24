@@ -20,3 +20,8 @@ formatEuropeNFI.R
 R/Fundiv/
 R/draft/
 model/
+author_rev/
+*.docx
+*.zip
+submission_geb/
+_targets/
