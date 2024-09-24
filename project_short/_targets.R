@@ -8,31 +8,42 @@ for(i in 1:length(packages.in)) if(!(packages.in[i] %in% rownames(installed.pack
 options(tidyverse.quiet = TRUE)
 sf::sf_use_s2(FALSE)
 tar_option_set(packages = packages.in)
-
-
+mastif.am=readRDS("_targets/objects/mastif.am")
+mastif.eu=readRDS("_targets/objects/mastif.eu")
+fecundity.am_clim=readRDS("_targets/objects/fecundity.am_clim")
+fecundity.eu_clim=readRDS("_targets/objects/fecundity.eu_clim")
+species.meta=readRDS("_targets/objects/species.meta")
 list(
   #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
   # - BLUR DATA ---- %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
   #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
   # was done using complete dataset
   # tar_target(mastif.am,
-  #            blur_data(mastif.file="data/not_public/mastif.am")),
+  #            blur_data(mastif.file="data/not_public/mastif.am",
+  #                      species.meta.file="data/not_public/species.meta.csv")),
   # tar_target(mastif.eu,
-  #            blur_data(mastif.file="data/not_public/mastif.eu")),
+  #            blur_data(mastif.file="data/not_public/mastif.eu",
+  #                      species.meta.file="data/not_public/species.meta.csv")),
   # tar_target(fecundity.am_clim,
-  #            blur_nfi(nfi.file="data/not_public/fecundity.am_clim")),
+  #            blur_nfi(nfi.file="data/not_public/fecundity.am_clim",
+  #                     species.meta.file="data/not_public/species.meta.csv")),
   # tar_target(fecundity.eu_clim,
-  #            blur_nfi(nfi.file="data/not_public/fecundity.eu_clim")),
-  
+  #            blur_nfi(nfi.file="data/not_public/fecundity.eu_clim",
+  #                     species.meta.file="data/not_public/species.meta.csv")),
+  # 
   #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
   # - GBIF SPECIES DATA ---- %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
   #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
   tar_target(gbif_niche,
-             read.table("data/sp_gbif_climate.csv",header = TRUE)),
+             read.csv("data/sp_gbif_climate.csv",header = TRUE)),
   
   #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
   # - SPECIES SELECTION ---- %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
   #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+  # tar_target(
+  #   species.meta, # phylogeny of Mastif species
+  #   read.csv("data/not_public/species.meta.csv") |> select(-species_name,-X)
+  # ),
   tar_target(
     species_selection_nfi_margin,
     select_species_nfi_margin(fecundity.eu_clim,
@@ -45,14 +56,6 @@ list(
                                mastif.am,
                                mastif.eu)),
   tar_target(
-    species.phylo, # phylogeny of Mastif species
-    readRDS("data/species.phylo")
-  ),
-  tar_target(
-    species_class, #classification of nfi species
-    readRDS("data/species_class")
-  ),
-  tar_target(
     species_selection_rank,
     species_selection_nfi_margin$species_rank |> 
       filter(species%in%species_selection_gbif_margin$species_rank$species)
@@ -63,53 +66,24 @@ list(
       filter(species%in%species_selection_gbif_margin$species_quant$species)
   ),
   tar_target(
-    phylo.select,
-    species.phylo |> # species in mastif
-      inner_join(species_class) |>  # keep only species present in nfi and mastif
+    species.select,
+    species.meta |>  # keep only species present in nfi and mastif
       left_join(species_selection_quant) |>
       filter(!is.na(cold_valid)) |> 
-      separate(species_l,into=c("genus","species_only"),remove=FALSE) |> 
-      mutate(s_p=str_replace(species_l," ","_"),
-             sp_little=paste0(tolower(substr(genus,1,4)),substr(species_only,1,4)),
-             dir.sp=case_when(block=="america"~paste0("data/USTreeAtlas-main/shp/",sp_little),
-                              block=="europe"~paste0("data/chorological_maps_dataset/",species_l,"/shapefiles")),
-             direx=dir.exists(dir.sp)) |> 
-      filter(direx) |> 
-      mutate(
-        file.sp=case_when(block=="america"~sp_little,
-                          block=="europe"~paste0(s_p,"_plg")),
-        file.sp=case_when(species=="fagusSylvatic"~"Fagus_sylvatica_sylvatica_plg",
-                          species=="quercusIlex"~"Quercus_ilex_ilex_plg",
-                          TRUE~file.sp),
-        filex=file.exists(file.path(dir.sp,paste0(file.sp,".shp"))) 
-      ) |>
-      filter(filex)),
+      filter(!species %in% c(15,39,70))),
   tar_target(
     species_selection,
-    phylo.select$species
+    species.select$species
   ),
   
   #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
   # - PREPARE DATA FOR FIT---- %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
   #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
   tar_target(
-    phylo.zone, # correction of zone attribution
-    phylo.select|> 
-      mutate(zone=case_when(species=="abiesCephalon"~"europe",
-                            species=="acerCircinat"~"west",
-                            species=="acerSpicatum"~"east",
-                            species=="amelanchArborea"~"east",
-                            species=="asiminaTriloba"~"east",
-                            species=="cedrusAtlantic"~"europe",
-                            species=="frangulaAlnus"~"europe",
-                            species=="linderaBenzoin"~"east",
-                            TRUE~zone)) 
-  ),
-  tar_target(
     fecundity.fit.1, # margin set with 10th percentiles
     raw_data_margin(fecundity.eu_clim,
                     fecundity.am_clim,
-                    phylo.zone,
+                    species.select,
                     species_selection,
                     thresh=0.1)
   ),
@@ -117,7 +91,7 @@ list(
     fecundity.fit.25, # margin set with 25th percentiles
     raw_data_margin(fecundity.eu_clim,
                     fecundity.am_clim,
-                    phylo.zone,
+                    species.select,
                     species_selection,
                     thresh=0.25)
   ),

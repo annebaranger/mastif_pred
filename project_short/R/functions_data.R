@@ -22,19 +22,37 @@ loadRData <- function(fileName){
 #### Section 0 - Provide open data ####
 #' @authors Anne Baranger (INRAE - LESSEM)
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-blur_data <- function(mastif.file){
+blur_data <- function(mastif.file,
+                      species.meta.file){
+  species.meta=read.csv(species.meta.file)
   mastif.data=readRDS(mastif.file)
-  mastif.blur<-mastif.data[c("df.species.select","df.tree")]
-  mastif.blur$df.tree<-mastif.blur$df.tree |> 
+  mastif.blur<-mastif.data[["df.tree"]]|> 
     mutate(plotID=as.numeric(as.factor(plotID))) |> 
-    select(-c("ID","treeID","lon","lat"))
+    mutate(dh=pet-(map/12)) |> 
+    mutate(fecEstSe=na_if(fecEstSe,0),
+           fecEstMu=na_if(fecEstMu,0)) |> 
+    filter(!is.na(fecEstMu)) |> filter(!is.na(fecEstSe)) |> 
+    # compute numbers of observations per plot
+    group_by(plotID,species,mat,dh) |> 
+    summarise(n_plot=n(),
+              fecEstMu_plot=mean(fecEstMu,na.rm=TRUE),
+              se_plot=sqrt(sum(fecEstSe^2)/n_plot),
+              cv_plot=se_plot/fecEstMu_plot) |> 
+    ungroup() |> 
+    select(plotID,species,mat,dh,cv_plot) |> 
+    rename(species_name=species) |> 
+    left_join(species.meta[,c("species","species_name")],by=c("species_name")) |> 
+    select(-species_name)
+
   return(mastif.blur)
 }
 
-blur_nfi<-function(nfi.file){
+blur_nfi<-function(nfi.file,
+                   species.meta.file){
   nfi.data=readRDS(nfi.file)
-
-    ecoregions=sf::read_sf(dsn="data/WWF/official", #read ecoregions
+  species.meta=read.csv(species.meta.file)
+  
+  ecoregions=sf::read_sf(dsn="data/WWF/official", #read ecoregions
                          layer="wwf_terr_ecos") |>
     select(BIOME,ECO_NAME,geometry) |> 
     filter(!BIOME%in%c(98,99))
@@ -45,7 +63,11 @@ blur_nfi<-function(nfi.file){
   nfi.blur= cbind(nfi.data,
                   biome=points_biome$BIOME) |> 
     mutate(plot=as.numeric(as.factor(plot))) |> 
-    select(-c("lon","lat"))
+  select(plot,mat,dh,ISP,BA,biome,species) |>  
+    rename(species_name=species) |> 
+    left_join(species.meta[,c("species","species_name")],by=c("species_name")) |> 
+    select(-species_name)
+    
   
   return(nfi.blur)
 }
@@ -415,20 +437,8 @@ select_species_nfi_margin<-function(fecundity.eu_clim,
                                     mastif.eu,
                                     mastif.am){
   
-  mastif.species.niche<-rbind(mastif.am$df.tree, 
-                              mastif.eu$df.tree) |> 
-    mutate(dh=pet-(map/12)) |> 
-    mutate(fecEstSe=na_if(fecEstSe,0),
-           fecEstMu=na_if(fecEstMu,0)) |> 
-    filter(!is.na(fecEstMu)) |> filter(!is.na(fecEstSe)) |> 
-    # compute numbers of observations per plot
-    group_by(plotID,species,mat,dh) |> 
-    summarise(n_plot=n(),
-              fecEstMu_plot=mean(fecEstMu,na.rm=TRUE),
-              se_plot=sqrt(sum(fecEstSe^2)/n_plot),
-              cv_plot=se_plot/fecEstMu_plot) |> 
-    # Compute mean of se per plot
-    ungroup() |> 
+  mastif.species.niche<-rbind(mastif.am, 
+                              mastif.eu) |> 
     pivot_longer(cols=c("mat","dh"),
                  names_to = "clim",
                  values_to = "clim_val")  |> 
@@ -526,20 +536,8 @@ select_species_gbif_margin<-function(gbif_niche,
                                      mastif.am,
                                      mastif.eu){
   
-  mastif.species.niche<-rbind(mastif.am$df.tree, 
-                              mastif.eu$df.tree) |> 
-    mutate(dh=pet-(map/12)) |> 
-    mutate(fecEstSe=na_if(fecEstSe,0),
-           fecEstMu=na_if(fecEstMu,0)) |> 
-    filter(!is.na(fecEstMu)) |> filter(!is.na(fecEstSe)) |> 
-    # compute numbers of observations per plot
-    group_by(plotID,species,mat,dh) |> 
-    summarise(n_plot=n(),
-              fecEstMu_plot=mean(fecEstMu,na.rm=TRUE),
-              se_plot=sqrt(sum(fecEstSe^2)/n_plot),
-              cv_plot=se_plot/fecEstMu_plot) |> 
-    # Compute mean of se per plot
-    ungroup() |> 
+  mastif.species.niche<-rbind(mastif.am, 
+                              mastif.eu) |> 
     pivot_longer(cols=c("mat","dh"),
                  names_to = "clim",
                  values_to = "clim_val")  |> 
@@ -560,11 +558,7 @@ select_species_gbif_margin<-function(gbif_niche,
                                   grepl("r",limit)~rrange.mastif)) |> 
     select(-qrange.mastif,-rrange.mastif)
   
-  gbif_niche<-gbif_niche[,c("species","mat.qhigh","mat.qlow","mat.rhigh","mat.rlow",
-                            "dh.qhigh","dh.qlow","dh.rhigh","dh.rlow")]|> 
-    separate(species,into=c("genus","sp")) |> 
-    mutate(species=paste0(substr(tolower(genus),1,8),substr(str_to_title(sp),1,8))) |> 
-    select(-genus,-sp) |> 
+  gbif_niche<-gbif_niche |> 
     pivot_longer(cols=c("mat.qhigh","mat.qlow","mat.rhigh","mat.rlow",
                         "dh.qhigh","dh.qlow","dh.rhigh","dh.rlow"),
                  names_to = "limit",

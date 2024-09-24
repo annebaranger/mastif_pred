@@ -80,8 +80,6 @@ raw_data_margin <- function(fecundity.eu_clim,
   fec_tot=rbind(fecundity.eu_clim |> mutate(block="europe"),
                 fecundity.am_clim|> mutate(block="america")) |>
     left_join(phylo.select) |>
-    dplyr::select(plot,taxa,genus,species,BA,ISP,fecGmMu,fecGmSd,dh,pet,map,mat,block,zone,biome,
-                  dh_valid,cold_valid,hot_valid) |>
     filter(BA!=0) |> #rm absences
     # mutate(dh=12*pet-map) |> 
     filter(!is.na(ISP)) |> 
@@ -754,7 +752,7 @@ fit.species <- function(data_fit,
     model=paste0("ancova_",sp,"_lin.RData")
     X=model.matrix(~margin.temp, sp.mod) 
     if(file.exists(file.path(folder,model))){
-      load(file.path(folder,model))
+      fit<-loadRData(file.path(folder,model))
     }else{
       data_sp=list(N=dim(sp.mod)[1],
                    NX=ncol(X),
